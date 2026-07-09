@@ -87,7 +87,7 @@ function FrameworkSection({
 }
 
 function FrameworkCard({ framework, isActive, selected, actionLabel, onAction }) {
-  const implementationPath = framework.slug === "cmmc" ? "/cmmc" : "/implementation";
+  const implementationPath = framework.slug === "cmmc" ? "/cmmc" : `/implementation?framework=${framework.slug}`;
 
   return (
     <article className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">

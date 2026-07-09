@@ -14,16 +14,21 @@ import {
   SlidersHorizontal,
   UploadCloud,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { Link, Navigate, useLocation } from "react-router-dom";
+import { Component, useEffect, useMemo, useState } from "react";
+import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { useUser } from "../auth/UserContext";
+import { readScopedJson } from "../auth/session";
 import AppShell from "../components/layout/AppShell";
 import { useFrameworkData } from "../core/adapters/useFrameworkData";
 import { useRelationshipGraph, getLinkedItemsFromGraph } from "../core/adapters/useRelationshipGraph";
 import { useOrganizationStore } from "../core/adapters/useOrganizationStore";
+import { useComplianceState } from "../compliance/ComplianceStateContext";
 import { DEFAULT_FRAMEWORK_ID, ISO27001_FRAMEWORK_ID, resolveFrameworkId } from "../core/engines/framework-engine/frameworkRegistry";
 import { frameworks } from "../data/mockData";
+import EvidenceManagementSection from "../evidence/EvidenceManagementSection";
 import { CMMCProgressRing } from "../features/cmmc/components";
 import { cmmcDomains } from "../features/cmmc/data";
+import { buildCrossModuleTarget, implementationTabForItemType } from "../navigation/crossModuleNavigation";
 import {
   getQuestionnaireApplicability,
   isRelevantToQuestionnaire,
@@ -481,7 +486,9 @@ const riskColumns = [
   { key: "id", label: "ID" },
   { key: "title", label: "Description" },
   { key: "status", label: "Status" },
+  { key: "progressStatus", label: "Progress" },
   { key: "owner", label: "Assigned To" },
+  { key: "dueDate", label: "Due Date" },
   { key: "category", label: "Category" },
   { key: "initialRiskScore", label: "Initial Risk Score" },
   { key: "residualRiskScore", label: "Residual Risk Score" },
@@ -493,6 +500,7 @@ const controlColumns = [
   { key: "id", label: "ID" },
   { key: "title", label: "Description" },
   { key: "status", label: "Status" },
+  { key: "progressStatus", label: "Progress" },
   { key: "owner", label: "Assigned To" },
   { key: "dueDate", label: "Due Date" },
   { key: "category", label: "Category" },
@@ -505,6 +513,7 @@ const testColumns = [
   { key: "id", label: "ID" },
   { key: "title", label: "Title" },
   { key: "status", label: "Status" },
+  { key: "progressStatus", label: "Progress" },
   { key: "owner", label: "Assigned To" },
   { key: "dueDate", label: "Due Date" },
   { key: "category", label: "Category" },
@@ -525,6 +534,7 @@ const populationColumns = [
   { key: "id", label: "ID" },
   { key: "title", label: "Description" },
   { key: "status", label: "Status" },
+  { key: "progressStatus", label: "Progress" },
   { key: "owner", label: "Assigned To" },
   { key: "dueDate", label: "Due Date" },
   { key: "category", label: "Category" },
@@ -534,6 +544,7 @@ const populationColumns = [
 
 export default function Implementation() {
   const location = useLocation();
+  const navigate = useNavigate();
   const frameworkWorkspace = useFrameworkWorkspace();
   const [activeTab, setActiveTab] = useState("Tests");
   const selectedFramework = getSelectedFramework(location);
@@ -572,6 +583,7 @@ export default function Implementation() {
         ...r,
         owner: saved.assignments?.owner || "Unassigned",
         status: saved.status || r.status || "Ready",
+        dueDate: saved.dueDate || r.dueDate || "",
         initialRiskScore: initialLikelihood * initialImpact,
         residualRiskScore: residualLikelihood * residualImpact,
         comments: saved.comments?.length || "",
@@ -584,6 +596,7 @@ export default function Implementation() {
         ...c,
         owner: saved.assignments?.owner || "Unassigned",
         status: saved.status || c.status || "Ready",
+        dueDate: saved.dueDate || c.dueDate || "",
         comments: saved.comments?.length || "",
       };
     });
@@ -594,6 +607,7 @@ export default function Implementation() {
         ...t,
         owner: saved.assignments?.owner || "Unassigned",
         status: saved.status || t.status || "Ready",
+        dueDate: saved.dueDate || t.dueDate || "",
         comments: saved.comments?.length || "",
       };
     });
@@ -604,6 +618,18 @@ export default function Implementation() {
         ...p,
         owner: saved.assignments?.owner || "Unassigned",
         status: saved.status || p.status || "Ready",
+        dueDate: saved.dueDate || p.dueDate || "",
+        comments: saved.comments?.length || "",
+      };
+    });
+
+    const populations = rawImplementationData.populations.map((p) => {
+      const saved = (workspaceData && workspaceData[p.id]) ?? {};
+      return {
+        ...p,
+        owner: saved.assignments?.owner || "Unassigned",
+        status: saved.status || p.status || "Ready",
+        dueDate: saved.dueDate || p.dueDate || "",
         comments: saved.comments?.length || "",
       };
     });
@@ -614,6 +640,7 @@ export default function Implementation() {
       controls,
       tests,
       policies,
+      populations,
     };
   }, [rawImplementationData, workspaceData]);
 
@@ -638,6 +665,33 @@ export default function Implementation() {
       setWorkspaceItem(null);
       setIsWorkspaceClosing(false);
     }, 200);
+  };
+  const navigateRelatedItem = (type, relatedItem, { mode = "resolve" } = {}) => {
+    if (!relatedItem?.id) return;
+
+    const implementationType = {
+      Control: "Control",
+      Test: "Test",
+      Risk: "Risk",
+      Policy: "Policy",
+      Population: "Population",
+      Implementation: "Population",
+    }[type];
+
+    if (implementationType) {
+      setActiveTab(implementationTabForItemType(implementationType, visibleActiveTab));
+      selectWorkspaceItem(createWorkspaceItem(implementationType, relatedItem));
+      return;
+    }
+
+    const target = buildCrossModuleTarget({
+      activeFramework: selectedFramework,
+      itemId: relatedItem.id,
+      itemType: type,
+      moduleContext: relatedItem.title || relatedItem.name || "",
+      mode,
+    });
+    navigate(target.path, { state: target.state });
   };
 
   useEffect(() => {
@@ -669,6 +723,10 @@ export default function Implementation() {
 
   if (shouldRedirectToCanonicalCMMC) {
     return <CanonicalCMMCRedirect frameworkWorkspace={frameworkWorkspace} />;
+  }
+
+  if (!selectedFramework && frameworkWorkspace.activeFramework?.slug) {
+    return <Navigate to={`/implementation?framework=${frameworkWorkspace.activeFramework.slug}`} replace />;
   }
 
   if (!selectedFramework) {
@@ -719,21 +777,24 @@ export default function Implementation() {
                 isWorkspaceClosing ? "translate-x-full" : "translate-x-0"
               }`}
             >
-              <ImplementationWorkspace
-                key={workspaceItem.id}
-                item={workspaceItem}
-                framework={selectedFramework}
-                data={implementationData}
-                savedState={workspaceData && workspaceData[workspaceItem.id]}
-                relationshipGraph={relationshipGraph}
-                onWorkspaceStateChange={(itemId, nextState) => {
-                  // Route through OrganizationEngine for proper audit tracking,
-                  // then the hook syncs both the engine snapshot and the legacy
-                  // flat-map so all downstream reads continue to work.
-                  saveWorkspaceItem(itemId, nextState);
-                }}
-                onClose={closeWorkspaceItem}
-              />
+              <WorkspaceErrorBoundary itemKey={workspaceItem.id} onClose={closeWorkspaceItem}>
+                <ImplementationWorkspace
+                  key={workspaceItem.id}
+                  item={workspaceItem}
+                  framework={selectedFramework}
+                  data={implementationData}
+                  savedState={workspaceData && workspaceData[workspaceItem.id]}
+                  relationshipGraph={relationshipGraph}
+                  onWorkspaceStateChange={(itemId, nextState) => {
+                    // Route through OrganizationEngine for proper audit tracking,
+                    // then the hook syncs both the engine snapshot and the legacy
+                    // flat-map so all downstream reads continue to work.
+                    saveWorkspaceItem(itemId, nextState);
+                  }}
+                  onNavigateRelatedItem={navigateRelatedItem}
+                  onClose={closeWorkspaceItem}
+                />
+              </WorkspaceErrorBoundary>
             </div>
           )}
         </section>
@@ -4559,7 +4620,11 @@ function RiskScenariosSection({ rows, questionnaireResponses, workspaceData, sel
                     {renderStatusPill(risk, applicability, workspaceData)}
                   </RiskCell>
                 )}
+                {visibleColumns.progressStatus && (
+                  <RiskCell>{renderProgressStatusPill(risk, workspaceData)}</RiskCell>
+                )}
                 {visibleColumns.owner && <RiskCell>{risk.owner}</RiskCell>}
+                {visibleColumns.dueDate && <RiskCell>{risk.dueDate}</RiskCell>}
                 {visibleColumns.category && <RiskCell>{risk.category}</RiskCell>}
                 {visibleColumns.initialRiskScore && <RiskCell>{risk.initialRiskScore}</RiskCell>}
                 {visibleColumns.residualRiskScore && <RiskCell>{risk.residualRiskScore}</RiskCell>}
@@ -4748,6 +4813,7 @@ function ControlsSection({ rows, questionnaireResponses, workspaceData, selected
                 <RiskCell>
                   {renderStatusPill(control, applicability, workspaceData)}
                 </RiskCell>
+                <RiskCell>{renderProgressStatusPill(control, workspaceData)}</RiskCell>
                 <RiskCell>{control.owner}</RiskCell>
                 <RiskCell>{control.dueDate}</RiskCell>
                 <RiskCell>{control.category}</RiskCell>
@@ -4922,6 +4988,7 @@ function TestsSection({ rows, questionnaireResponses, workspaceData, selectedFra
                 <RiskCell>
                   {renderStatusPill(test, applicability, workspaceData)}
                 </RiskCell>
+                <RiskCell>{renderProgressStatusPill(test, workspaceData)}</RiskCell>
                 <RiskCell>{test.owner}</RiskCell>
                 <RiskCell>{test.dueDate}</RiskCell>
                 <RiskCell>{test.category}</RiskCell>
@@ -5241,6 +5308,7 @@ function PopulationSection({ rows, questionnaireResponses, workspaceData, select
                 <RiskCell strong>{population.id}</RiskCell>
                 <RiskCell><span className="font-black text-slate-900">{population.title}</span></RiskCell>
                 <RiskCell>{renderStatusPill(population, applicability, workspaceData)}</RiskCell>
+                <RiskCell>{renderProgressStatusPill(population, workspaceData)}</RiskCell>
                 <RiskCell>{population.owner}</RiskCell>
                 <RiskCell>{population.dueDate}</RiskCell>
                 <RiskCell>{population.category}</RiskCell>
@@ -5257,30 +5325,234 @@ function PopulationSection({ rows, questionnaireResponses, workspaceData, select
   );
 }
 
-function ImplementationWorkspace({ item, framework, data, savedState = {}, onWorkspaceStateChange, onClose, relationshipGraph }) {
+class WorkspaceErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+
+  componentDidCatch(error, info) {
+    console.error("Implementation workspace failed to render", error, info);
+  }
+
+  componentDidUpdate(previousProps) {
+    if (previousProps.itemKey !== this.props.itemKey && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+
+  render() {
+    if (!this.state.error) return this.props.children;
+
+    return (
+      <aside className="h-full min-w-0 overflow-y-auto bg-white p-5">
+        <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+          <div>
+            <p className="text-xs font-black uppercase tracking-wider text-rose-500">Panel Error</p>
+            <h2 className="mt-2 text-xl font-black text-slate-950">Details could not load</h2>
+          </div>
+          <button
+            type="button"
+            onClick={this.props.onClose}
+            className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-50 hover:text-slate-700"
+            aria-label="Close details panel"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="mt-5 rounded-lg border border-rose-100 bg-rose-50 p-4">
+          <p className="text-sm font-bold text-rose-800">
+            The table is okay, but this record has saved data the details panel cannot display yet.
+          </p>
+          <p className="mt-3 break-words text-xs font-semibold leading-5 text-rose-700">
+            {safeDisplayText(this.state.error?.message, "Unknown render error")}
+          </p>
+        </div>
+      </aside>
+    );
+  }
+}
+
+function ImplementationWorkspace({ item, framework, data, savedState = {}, onWorkspaceStateChange, onClose, relationshipGraph, onNavigateRelatedItem }) {
+  const { user } = useUser();
   const state = savedState || {};
-  const linkedItems = getLinkedItemsFromGraph(item, data, relationshipGraph);
+  const graphLinkedItems = useMemo(
+    () => getLinkedItemsFromGraph(item, data, relationshipGraph),
+    [data, item, relationshipGraph]
+  );
+  const linkedItems = useMemo(
+    () => resolveLinkedItemsWithOverrides(graphLinkedItems, data, state),
+    [data, graphLinkedItems, state]
+  );
   const frameworkBadge = framework?.shortName || framework?.name || "Framework";
   const [organizationStatus, setOrganizationStatus] = useState(state.status || "");
   const [dueDate, setDueDate] = useState(state.dueDate || "");
+  const [linkingSection, setLinkingSection] = useState("");
+  const [linkSelection, setLinkSelection] = useState("");
   const [assignments, setAssignments] = useState({
-    owner: state.assignments?.owner || "Unassigned",
-    reviewer: state.assignments?.reviewer || "Unassigned",
-    approver: state.assignments?.approver || "Unassigned",
+    owner: safeDisplayText(state.assignments?.owner, "Unassigned"),
+    reviewer: safeDisplayText(state.assignments?.reviewer, "Unassigned"),
+    approver: safeDisplayText(state.assignments?.approver, "Unassigned"),
   });
-  const evidenceFiles = state.evidenceFiles || [];
-  const evidenceByRequirement = state.evidenceByRequirement || {};
+  const evidenceFiles = normalizeRelationshipList(state.evidenceFiles);
+  const evidenceByRequirement = state.evidenceByRequirement && typeof state.evidenceByRequirement === "object" ? state.evidenceByRequirement : {};
+  const linkedEvidenceIds = normalizeRelationshipList(state.linkedEvidenceIds);
   const [commentText, setCommentText] = useState("");
-  const [comments, setComments] = useState(state.comments || []);
-  const [timeline, setTimeline] = useState(state.timeline || []);
-  const tasks = state.tasks || [];
+  const [comments, setComments] = useState(() => normalizeRelationshipList(state.comments));
+  const [timeline, setTimeline] = useState(() => normalizeRelationshipList(state.timeline));
+  const tasks = normalizeRelationshipList(state.tasks);
+  const {
+    audit,
+    evidenceStore,
+    policies: centralPolicies,
+    questionnaireResponses: centralQuestionnaireResponses,
+    tasks: centralTasks,
+    actions,
+  } = useComplianceState();
+  const evidenceRecords = evidenceStore.records;
+  const setEvidenceRecords = actions.saveEvidenceRecords;
+  const relationshipDetails = useMemo(
+    () =>
+      buildImplementationRelationshipDetails({
+        item,
+        linkedItems,
+        data,
+        evidenceRecords,
+        audit,
+        tasks: centralTasks,
+        policies: centralPolicies,
+        questionnaireResponses: centralQuestionnaireResponses,
+        workspaceState: state,
+      }),
+    [audit, centralPolicies, centralQuestionnaireResponses, centralTasks, data, evidenceRecords, item, linkedItems, state]
+  );
+  const navigateRelated = (type, relatedItem, mode = "resolve") => {
+    if (!onNavigateRelatedItem) return;
+    onNavigateRelatedItem(type, relatedItem, { mode });
+  };
+
+  const getLinkedIds = (family) =>
+    normalizeRelationshipList(linkedItems[family]).map((relatedItem) => safeDisplayText(relatedItem.id)).filter(Boolean);
+
+  const getAvailableLinkOptions = (family) => {
+    const linkedIds = new Set(getLinkedIds(family));
+    return normalizeRelationshipList(data?.[family])
+      .filter((candidate) => {
+        const id = safeDisplayText(candidate.id || candidate.name);
+        return id && !linkedIds.has(id) && id !== safeDisplayText(item.id);
+      })
+      .map((candidate) => ({
+        id: safeDisplayText(candidate.id || candidate.name),
+        label: safeDisplayText(candidate.title || candidate.name || candidate.id, "Untitled"),
+      }));
+  };
+
+  const openLinkPicker = (family) => {
+    setLinkingSection((current) => (current === family ? "" : family));
+    setLinkSelection("");
+  };
+
+  const linkRelatedItem = (family, relatedId) => {
+    const key = linkedStateKeyByFamily[family];
+    if (!key || !relatedId) return;
+
+    const nextIds = [...new Set([...getLinkedIds(family), relatedId])];
+    setLinkingSection("");
+    setLinkSelection("");
+    addTimelineEvent(`Linked ${singularRelationshipLabel(family)}`, { [key]: nextIds });
+  };
+
+  const unlinkRelatedItem = (family, relatedId) => {
+    const key = linkedStateKeyByFamily[family];
+    if (!key || !relatedId) return;
+
+    const nextIds = getLinkedIds(family).filter((id) => id !== relatedId);
+    addTimelineEvent(`Unlinked ${singularRelationshipLabel(family)}`, { [key]: nextIds });
+  };
+
+  const renderLinkPicker = (family) => {
+    if (linkingSection !== family) return null;
+
+    const options = getAvailableLinkOptions(family);
+    return (
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
+        {options.length ? (
+          <>
+            <select
+              value={linkSelection}
+              onChange={(event) => setLinkSelection(event.target.value)}
+              className="h-9 w-full rounded border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 outline-none"
+            >
+              <option value="">Select {singularRelationshipLabel(family).toLowerCase()}</option>
+              {options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.id} - {option.label}
+                </option>
+              ))}
+            </select>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setLinkingSection("")}
+                className="rounded border border-slate-200 bg-white px-3 py-1 text-xs font-black text-slate-600 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!linkSelection}
+                onClick={() => linkRelatedItem(family, linkSelection)}
+                className="rounded bg-slate-900 px-3 py-1 text-xs font-black text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                Add
+              </button>
+            </div>
+          </>
+        ) : (
+          <p className="text-xs font-semibold text-slate-400">No available items to link.</p>
+        )}
+      </div>
+    );
+  };
+
+  const renderLinkedCard = (family, relatedItem, typeLabel, options = {}) => (
+    <div key={relatedItem.id} className={options.className || "rounded-lg border border-slate-200 bg-slate-50/50 p-3.5 space-y-3"}>
+      <button
+        type="button"
+        onClick={() => navigateRelated(typeLabel, relatedItem)}
+        className="block w-full text-left text-sm font-black text-slate-900 hover:text-blue-700"
+      >
+        {safeDisplayText(relatedItem.title || relatedItem.name || relatedItem.id, typeLabel)}
+      </button>
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs font-bold text-slate-500">{safeDisplayText(relatedItem.id)}</span>
+        <div className="flex items-center gap-3">
+          {options.badge && (
+            <span className={options.badgeClassName || "rounded bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-500 uppercase"}>
+              {options.badge}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => unlinkRelatedItem(family, relatedItem.id)}
+            className="text-xs font-black text-blue-600 hover:text-blue-700 hover:underline"
+          >
+            Unlink
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   // Load dynamic employee list (no fake fallbacks)
   const employeesList = useMemo(() => {
     try {
-      const saved = localStorage.getItem("spectramind:employees");
-      const list = saved ? JSON.parse(saved) : [];
-      const names = list.map((emp) => emp.name);
+      const list = readScopedJson("spectramind:employees", []);
+      const names = list.map((emp) => safeDisplayText(emp.name)).filter(Boolean);
       if (!names.includes("Unassigned")) names.push("Unassigned");
       return names;
     } catch {
@@ -5302,9 +5574,11 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
       assignments,
       evidenceFiles,
       evidenceByRequirement,
+      linkedEvidenceIds,
       comments,
       timeline,
       tasks,
+      ...getSavedLinkedOverrides(state),
       initialLikelihood,
       initialImpact,
       treatment,
@@ -5312,6 +5586,42 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
       residualImpact,
       ...overrides,
     });
+  };
+
+  const handleEvidenceChange = (linkedEvidence) => {
+    const nextEvidenceFiles = linkedEvidence.map((record) => {
+      const version = record.versions?.find((candidate) => candidate.id === record.currentVersionId) || record.versions?.at(-1);
+      return {
+        id: record.id,
+        name: version?.fileName || record.title,
+        status: record.evidenceStatus || "Pending Review",
+        version: version?.versionNumber || 1,
+        uploadedAt: version?.uploadedAt || record.createdAt,
+      };
+    });
+    const nextEvidenceIds = nextEvidenceFiles.map((evidence) => evidence.id);
+    const nextTimeline = [
+      { id: `evidence-${Date.now()}`, label: "Evidence updated" },
+      ...timeline,
+    ];
+
+    setTimeline(nextTimeline);
+    saveWorkspaceState({
+      status: nextEvidenceFiles.length ? "Pending Review" : organizationStatus,
+      evidenceFiles: nextEvidenceFiles,
+      linkedEvidenceIds: nextEvidenceIds,
+      evidenceCount: nextEvidenceFiles.length,
+      timeline: nextTimeline,
+    });
+
+    for (const control of linkedItems.controls || []) {
+      onWorkspaceStateChange(control.id, {
+        evidenceCount: nextEvidenceFiles.length,
+        linkedEvidenceIds: nextEvidenceIds,
+        evidenceFiles: nextEvidenceFiles,
+        evidenceStatus: nextEvidenceFiles.length ? "Pending Review" : "Missing",
+      });
+    }
   };
 
   const addTimelineEvent = (label, stateOverrides = {}) => {
@@ -5361,19 +5671,9 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
   const addComment = () => {
     const trimmedComment = commentText.trim();
     if (!trimmedComment) return;
-    const activeAuthor = (() => {
-      try {
-        const saved = localStorage.getItem("spectramind:employees");
-        const list = saved ? JSON.parse(saved) : [];
-        return list[0]?.name || "Admin";
-      } catch {
-        return "Admin";
-      }
-    })();
-
     const newCommentObj = {
       id: `comment-${Date.now()}`,
-      user: activeAuthor,
+      user: user?.name || "User",
       text: trimmedComment,
       timestamp: new Date().toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
     };
@@ -5386,9 +5686,10 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
   const renderComment = (comment, index) => {
     const isObj = typeof comment === "object" && comment !== null;
     const userName = isObj ? comment.user : "User";
-    const userInitial = userName[0] || "U";
-    const text = isObj ? comment.text : comment;
-    const time = isObj ? comment.timestamp : "Just now";
+    const userLabel = safeDisplayText(userName, "User");
+    const userInitial = userLabel[0] || "U";
+    const text = safeDisplayText(isObj ? comment.text : comment);
+    const time = safeDisplayText(isObj ? comment.timestamp : "Just now", "Just now");
 
     return (
       <div key={index} className="rounded-lg border border-slate-200 bg-slate-50/50 p-4 space-y-3">
@@ -5398,7 +5699,7 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
               {userInitial}
             </span>
             <div>
-              <p className="text-xs font-black text-slate-900">{userName}</p>
+              <p className="text-xs font-black text-slate-900">{userLabel}</p>
               <p className="text-[10px] font-bold text-slate-400">{time}</p>
             </div>
           </div>
@@ -5408,9 +5709,46 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
     );
   };
 
+  const renderRelationshipExtras = () => (
+    <>
+      <RelationshipSummaryBadges details={relationshipDetails} onNavigate={navigateRelated} />
+      <RelatedSection
+        title="Connected Policies"
+        items={relationshipDetails.policies}
+        emptyLabel="No connected policies."
+        onOpen={(policy) => navigateRelated("Policy", policy)}
+      />
+      <RelatedSection
+        title="Connected Evidence"
+        items={relationshipDetails.evidence}
+        emptyLabel="No connected evidence."
+        onOpen={(evidence) => navigateRelated("Evidence", evidence)}
+      />
+      <RelatedSection
+        title="Open Tasks"
+        items={relationshipDetails.tasks}
+        emptyLabel="No open tasks."
+        onOpen={(task) => navigateRelated("Task", task)}
+      />
+      <RelatedSection
+        title="Audit Findings"
+        items={relationshipDetails.auditFindings}
+        emptyLabel="No open audit findings."
+        onOpen={(finding) => navigateRelated(auditFindingToItemType(finding), { id: finding.relatedItemId }, "view")}
+      />
+      <RelatedSection
+        title="Recent Activity"
+        items={relationshipDetails.activity}
+        emptyLabel="No recent activity."
+        readOnly
+      />
+    </>
+  );
+
   // ── 1. TEST DRAWER LAYOUT ──────────────────────────────────────────────────
   if (item.type === "Test") {
-    const isNotApplicable = organizationStatus === "Not Applicable" || organizationStatus === "not_applicable";
+    const progressStatus = getProgressStatus(item, { [item.id]: state });
+    const isCompleted = progressStatus === "Completed";
 
     return (
       <aside className="h-full min-w-0 overflow-y-auto bg-white p-5 space-y-6 w-full">
@@ -5419,14 +5757,14 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
           <div className="space-y-2">
             <div className="flex gap-2">
               <span className="inline-flex rounded bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-500 uppercase tracking-wide">
-                {isNotApplicable ? "NOT APPLICABLE" : "READY"}
+                {isCompleted ? "COMPLETED" : "READY"}
               </span>
               <span className="inline-flex rounded bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-500 uppercase tracking-wide">
                 {frameworkBadge}
               </span>
             </div>
             <h2 className="text-xl font-black text-slate-950">
-              {item.id.replace("TEST-", "Test ")}
+              {safeDisplayText(item.id, "Test").replace("TEST-", "Test ")}
             </h2>
           </div>
           <button
@@ -5442,39 +5780,18 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
         <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 p-4">
           <h4 className="text-[10px] font-black uppercase tracking-wider text-indigo-700">Guidance</h4>
           <p className="mt-2 text-sm leading-6 text-indigo-950/90">
-            {item.guidance || "Provide documentation showing that your organization completed a physical access review within the last 12 months."}
+            {safeDisplayText(item.guidance, "Provide documentation showing that your organization completed a physical access review within the last 12 months.")}
           </p>
         </div>
 
-        {/* Applicability Toggle Section */}
+        {/* Completion Section */}
         <div className="space-y-2 border-b border-slate-100 pb-5">
-          {isNotApplicable ? (
-            <div className="space-y-3">
-              <h4 className="text-sm font-black text-slate-900">This test is marked as Not Applicable</h4>
-              <p className="text-xs leading-5 text-slate-500">
-                This test does not apply to your organization and will not be included in calculations.
-              </p>
-              <button
-                onClick={() => updateOrganizationStatus("Ready")}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-black text-white transition hover:bg-blue-700"
-              >
-                Mark as Applicable
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <h4 className="text-sm font-black text-slate-900">This test is marked as Applicable</h4>
-              <p className="text-xs leading-5 text-slate-500">
-                This test applies to your organization and is included in compliance calculations.
-              </p>
-              <button
-                onClick={() => updateOrganizationStatus("not_applicable")}
-                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-50"
-              >
-                Mark as Not Applicable
-              </button>
-            </div>
-          )}
+          <CompletionStatusControl
+            typeLabel="test"
+            isCompleted={isCompleted}
+            onComplete={() => updateOrganizationStatus("Completed")}
+            onReopen={() => updateOrganizationStatus("In Progress")}
+          />
         </div>
 
         {/* Details Section */}
@@ -5509,39 +5826,40 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500 font-semibold">Category</span>
-              <span className="font-bold text-slate-800">{item.category || "General"}</span>
+              <span className="font-bold text-slate-800">{safeDisplayText(item.category, "General")}</span>
             </div>
           </div>
         </div>
+
+        {renderRelationshipExtras()}
 
         {/* Mapped Controls Section */}
         <div className="space-y-3 border-b border-slate-100 pb-5">
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Mapped Controls</h4>
-            <button className="rounded border border-slate-200 px-2 py-0.5 text-xs font-bold text-slate-700 hover:bg-slate-50">
+            <button
+              type="button"
+              onClick={() => openLinkPicker("controls")}
+              className="rounded border border-slate-200 px-2 py-0.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+            >
               Link
             </button>
           </div>
-          {linkedItems.controls?.map((ctrl) => (
-            <div key={ctrl.id} className="rounded-lg border border-slate-200 bg-slate-50/50 p-3.5 space-y-3">
-              <p className="text-sm font-black text-slate-900">{ctrl.title}</p>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-50 text-xs font-black text-blue-700 uppercase">
-                    {(ctrl.owner || "U")[0]}
-                  </span>
-                  <span className="text-xs font-semibold text-slate-600">{ctrl.owner || "Unassigned"}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-500">
-                    IMPLEMENTED
-                  </span>
-                  <button className="text-xs font-bold text-blue-600 hover:underline">Unlink</button>
-                </div>
-              </div>
-            </div>
-          ))}
+          {renderLinkPicker("controls")}
+          {linkedItems.controls?.map((ctrl) =>
+            renderLinkedCard("controls", ctrl, "Control", { badge: "Implemented" })
+          )}
+          {!linkedItems.controls?.length && (
+            <p className="text-xs font-semibold text-slate-400 italic">No mapped controls.</p>
+          )}
         </div>
+
+        <EvidenceManagementSection
+          context={buildEvidenceContext({ item, linkedItems, framework, frameworkBadge })}
+          records={evidenceRecords}
+          onRecordsChange={setEvidenceRecords}
+          onEvidenceChange={handleEvidenceChange}
+        />
 
         {/* History Section */}
         <div className="space-y-3 border-b border-slate-100 pb-5">
@@ -5583,7 +5901,8 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
 
   // ── 2. CONTROL DRAWER LAYOUT ───────────────────────────────────────────────
   if (item.type === "Control") {
-    const isImplemented = organizationStatus === "complete" || organizationStatus === "Implemented";
+    const progressStatus = getProgressStatus(item, { [item.id]: state });
+    const isImplemented = progressStatus === "Completed";
 
     return (
       <aside className="h-full min-w-0 overflow-y-auto bg-white p-5 space-y-6 w-full">
@@ -5599,7 +5918,7 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
               </span>
             </div>
             <h2 className="text-xl font-black text-slate-950">
-              {item.id}
+              {safeDisplayText(item.id)}
             </h2>
           </div>
           <button
@@ -5615,7 +5934,7 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
         <div className="space-y-2 border-b border-slate-100 pb-5">
           <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Description</h4>
           <p className="text-sm leading-6 text-slate-700">
-            {item.description}
+            {safeDisplayText(item.description)}
           </p>
         </div>
 
@@ -5651,30 +5970,48 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
             </div>
             <div className="flex justify-between">
               <span className="text-slate-500 font-semibold">Category</span>
-              <span className="font-bold text-slate-800">{item.category || "Compliance"}</span>
+              <span className="font-bold text-slate-800">{safeDisplayText(item.category, "Compliance")}</span>
             </div>
           </div>
         </div>
+
+        {renderRelationshipExtras()}
+
+        <div className="space-y-2 border-b border-slate-100 pb-5">
+          <CompletionStatusControl
+            typeLabel="control"
+            isCompleted={isImplemented}
+            onComplete={() => updateOrganizationStatus("Completed")}
+            onReopen={() => updateOrganizationStatus("In Progress")}
+          />
+        </div>
+
+        <EvidenceManagementSection
+          context={buildEvidenceContext({ item, linkedItems, framework, frameworkBadge })}
+          records={evidenceRecords}
+          onRecordsChange={setEvidenceRecords}
+          onEvidenceChange={handleEvidenceChange}
+        />
 
         {/* Linked Tests Section */}
         <div className="space-y-3 border-b border-slate-100 pb-5">
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Connected Tests</h4>
-            <button className="rounded border border-slate-200 px-2 py-0.5 text-xs font-bold text-slate-700 hover:bg-slate-50">
+            <button
+              type="button"
+              onClick={() => openLinkPicker("tests")}
+              className="rounded border border-slate-200 px-2 py-0.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+            >
               Link
             </button>
           </div>
-          {linkedItems.tests?.map((t) => (
-            <div key={t.id} className="rounded-lg border border-slate-200 bg-slate-50/50 p-3.5 space-y-3">
-              <p className="text-sm font-black text-slate-900">{t.title}</p>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-500">{t.id}</span>
-                <span className="rounded bg-blue-50 px-2.5 py-0.5 text-[10px] font-black text-blue-700 uppercase">
-                  READY
-                </span>
-              </div>
-            </div>
-          ))}
+          {renderLinkPicker("tests")}
+          {linkedItems.tests?.map((t) =>
+            renderLinkedCard("tests", t, "Test", {
+              badge: "Ready",
+              badgeClassName: "rounded bg-blue-50 px-2.5 py-0.5 text-[10px] font-black text-blue-700 uppercase",
+            })
+          )}
           {!linkedItems.tests?.length && (
             <p className="text-xs font-semibold text-slate-400 italic">No connected tests.</p>
           )}
@@ -5684,21 +6021,21 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
         <div className="space-y-3 border-b border-slate-100 pb-5">
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Mitigated Risks</h4>
-            <button className="rounded border border-slate-200 px-2 py-0.5 text-xs font-bold text-slate-700 hover:bg-slate-50">
+            <button
+              type="button"
+              onClick={() => openLinkPicker("risks")}
+              className="rounded border border-slate-200 px-2 py-0.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+            >
               Link
             </button>
           </div>
-          {linkedItems.risks?.map((r) => (
-            <div key={r.id} className="rounded-lg border border-slate-200 bg-slate-50/50 p-3.5 space-y-2">
-              <p className="text-sm font-black text-slate-900">{r.title}</p>
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-500">{r.id}</span>
-                <span className="rounded bg-rose-50 px-2 py-0.5 text-[10px] font-black text-rose-700">
-                  Mitigated
-                </span>
-              </div>
-            </div>
-          ))}
+          {renderLinkPicker("risks")}
+          {linkedItems.risks?.map((r) =>
+            renderLinkedCard("risks", r, "Risk", {
+              badge: "Mitigated",
+              badgeClassName: "rounded bg-rose-50 px-2 py-0.5 text-[10px] font-black text-rose-700",
+            })
+          )}
           {!linkedItems.risks?.length && (
             <p className="text-xs font-semibold text-slate-400 italic">No mitigated risks.</p>
           )}
@@ -5738,7 +6075,8 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
 
   // ── 3. RISK SCENARIO DRAWER LAYOUT (MATCHES SCREENSHOT) ─────────────────────
   if (item.type === "Risk") {
-    const isNotApplicable = organizationStatus === "not_applicable" || organizationStatus === "Not Applicable";
+    const progressStatus = getProgressStatus(item, { [item.id]: state });
+    const isCompleted = progressStatus === "Completed";
     const initialRiskScore = initialLikelihood * initialImpact;
     const residualRiskScore = residualLikelihood * residualImpact;
 
@@ -5749,19 +6087,19 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <span className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-[10px] font-black tracking-wide uppercase ${
-                isNotApplicable ? "bg-slate-100 text-slate-500" : "bg-purple-50 text-purple-700"
+                isCompleted ? "bg-emerald-50 text-emerald-700" : "bg-purple-50 text-purple-700"
               }`}>
-                {!isNotApplicable && (
+                {!isCompleted && (
                   <span className="h-1.5 w-1.5 rounded-full bg-purple-500 inline-block mr-0.5" />
                 )}
-                {isNotApplicable ? "NOT APPLICABLE" : "READY"}
+                {isCompleted ? "COMPLETED" : "READY"}
               </span>
               <span className="inline-flex rounded bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-500 uppercase tracking-wide">
                 {frameworkBadge}
               </span>
             </div>
             <h2 className="text-xl font-black text-slate-950 mt-1">
-              Risk Scenario {item.id}
+              Risk Scenario {safeDisplayText(item.id)}
             </h2>
           </div>
           <button
@@ -5776,22 +6114,18 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
         {/* Description Section */}
         <div className="space-y-1">
           <p className="text-sm leading-6 text-slate-700">
-            {item.description || "The absence or failure to ensure compliance with information security policies, rules, and standards..."}
+            {safeDisplayText(item.description, "The absence or failure to ensure compliance with information security policies, rules, and standards...")}
           </p>
         </div>
 
-        {/* Applicability Checkbox */}
-        <div className="flex items-center gap-2.5">
-          <input
-            type="checkbox"
-            id="risk-not-applicable"
-            checked={isNotApplicable}
-            onChange={(e) => updateOrganizationStatus(e.target.checked ? "not_applicable" : "Ready")}
-            className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+        {/* Completion Action */}
+        <div className="border-b border-slate-100 pb-4">
+          <CompletionStatusControl
+            typeLabel="risk scenario"
+            isCompleted={isCompleted}
+            onComplete={() => updateOrganizationStatus("Completed")}
+            onReopen={() => updateOrganizationStatus("In Progress")}
           />
-          <label htmlFor="risk-not-applicable" className="text-sm font-black text-slate-700 cursor-pointer select-none">
-            Not Applicable
-          </label>
         </div>
 
         {/* Details Section */}
@@ -5817,10 +6151,12 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
             </div>
             <div>
               <p className="text-slate-400 font-semibold text-xs uppercase">Category</p>
-              <p className="font-bold text-slate-800 mt-2">{item.category || "Operations"}</p>
+              <p className="font-bold text-slate-800 mt-2">{safeDisplayText(item.category, "Operations")}</p>
             </div>
           </div>
         </div>
+
+        {renderRelationshipExtras()}
 
         {/* Initial Risk Section */}
         <div className="rounded-xl border border-slate-150 p-4 space-y-4 bg-white shadow-sm">
@@ -5840,10 +6176,10 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
               max="5"
               step="1"
               value={initialLikelihood}
-              disabled={isNotApplicable}
+              disabled={isCompleted}
               onChange={(e) => handleRiskParamChange({ initialLikelihood: parseInt(e.target.value) })}
               className={`w-full h-1 rounded-lg appearance-none cursor-pointer accent-indigo-650 ${
-                isNotApplicable ? "bg-slate-100 cursor-not-allowed" : "bg-indigo-100"
+                isCompleted ? "bg-slate-100 cursor-not-allowed" : "bg-indigo-100"
               }`}
             />
             <div className="flex justify-between text-[10px] text-slate-400 font-bold px-1 mt-1">
@@ -5864,10 +6200,10 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
               max="5"
               step="1"
               value={initialImpact}
-              disabled={isNotApplicable}
+              disabled={isCompleted}
               onChange={(e) => handleRiskParamChange({ initialImpact: parseInt(e.target.value) })}
               className={`w-full h-1 rounded-lg appearance-none cursor-pointer accent-indigo-650 ${
-                isNotApplicable ? "bg-slate-100 cursor-not-allowed" : "bg-indigo-100"
+                isCompleted ? "bg-slate-100 cursor-not-allowed" : "bg-indigo-100"
               }`}
             />
             <div className="flex justify-between text-[10px] text-slate-400 font-bold px-1 mt-1">
@@ -5893,7 +6229,7 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
                   type="radio"
                   name="risk-treatment"
                   value={option}
-                  disabled={isNotApplicable}
+                  disabled={isCompleted}
                   checked={treatment === option}
                   onChange={() => handleRiskParamChange({ treatment: option })}
                   className="h-4 w-4 text-indigo-650 border-indigo-350 focus:ring-indigo-500 cursor-pointer"
@@ -5922,10 +6258,10 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
               max="5"
               step="1"
               value={residualLikelihood}
-              disabled={isNotApplicable}
+              disabled={isCompleted}
               onChange={(e) => handleRiskParamChange({ residualLikelihood: parseInt(e.target.value) })}
               className={`w-full h-1 rounded-lg appearance-none cursor-pointer accent-indigo-650 ${
-                isNotApplicable ? "bg-slate-100 cursor-not-allowed" : "bg-indigo-100"
+                isCompleted ? "bg-slate-100 cursor-not-allowed" : "bg-indigo-100"
               }`}
             />
             <div className="flex justify-between text-[10px] text-slate-400 font-bold px-1 mt-1">
@@ -5946,10 +6282,10 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
               max="5"
               step="1"
               value={residualImpact}
-              disabled={isNotApplicable}
+              disabled={isCompleted}
               onChange={(e) => handleRiskParamChange({ residualImpact: parseInt(e.target.value) })}
               className={`w-full h-1 rounded-lg appearance-none cursor-pointer accent-indigo-650 ${
-                isNotApplicable ? "bg-slate-100 cursor-not-allowed" : "bg-indigo-100"
+                isCompleted ? "bg-slate-100 cursor-not-allowed" : "bg-indigo-100"
               }`}
             />
             <div className="flex justify-between text-[10px] text-slate-400 font-bold px-1 mt-1">
@@ -5966,35 +6302,33 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
         <div className="space-y-3 border-b border-slate-100 pb-5">
           <div className="flex items-center justify-between">
             <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Mapped Controls</h4>
-            <button className="rounded bg-slate-900 border border-slate-900 px-3 py-1 text-xs font-black text-white hover:bg-slate-800">
+            <button
+              type="button"
+              onClick={() => openLinkPicker("controls")}
+              className="rounded bg-slate-900 border border-slate-900 px-3 py-1 text-xs font-black text-white hover:bg-slate-800"
+            >
               Link
             </button>
           </div>
-          {linkedItems.controls?.map((ctrl) => (
-            <div key={ctrl.id} className="rounded-lg border border-slate-150 p-4 space-y-3.5 bg-white">
-              <p className="text-sm font-black text-slate-950 leading-relaxed">{ctrl.title}</p>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-[10px] font-black text-white uppercase">
-                    {(ctrl.owner || "U")[0]}
-                  </span>
-                  <span className="text-xs font-semibold text-slate-500">{ctrl.owner || "Unassigned"}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="rounded bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-black text-indigo-700">
-                    IMPLEMENTED
-                  </span>
-                  <button className="text-xs font-black text-slate-400 hover:text-slate-600 hover:underline">
-                    Unlink
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
+          {renderLinkPicker("controls")}
+          {linkedItems.controls?.map((ctrl) =>
+            renderLinkedCard("controls", ctrl, "Control", {
+              badge: "Implemented",
+              className: "rounded-lg border border-slate-150 p-4 space-y-3.5 bg-white",
+              badgeClassName: "rounded bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-black text-indigo-700 uppercase",
+            })
+          )}
           {!linkedItems.controls?.length && (
             <p className="text-xs font-semibold text-slate-400 italic">No mapped controls.</p>
           )}
         </div>
+
+        <EvidenceManagementSection
+          context={buildEvidenceContext({ item, linkedItems, framework, frameworkBadge })}
+          records={evidenceRecords}
+          onRecordsChange={setEvidenceRecords}
+          onEvidenceChange={handleEvidenceChange}
+        />
 
         {/* History / Comment Timeline Section */}
         <div className="space-y-3">
@@ -6028,6 +6362,166 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
     );
   }
 
+  if (item.type === "Population") {
+    const progressStatus = getProgressStatus(item, { [item.id]: state });
+    const isCompleted = progressStatus === "Completed";
+
+    return (
+      <aside className="h-full min-w-0 overflow-y-auto bg-white p-5 space-y-6 w-full">
+        <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <span className={`inline-flex rounded px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${
+                isCompleted ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-blue-700"
+              }`}>
+                {isCompleted ? "COMPLETED" : "IN PROGRESS"}
+              </span>
+              <span className="inline-flex rounded bg-slate-100 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-slate-500">
+                {frameworkBadge}
+              </span>
+            </div>
+            <h2 className="text-xl font-black text-slate-950">
+              {safeDisplayText(item.title || item.name || item.id, "Population")}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-50 hover:text-slate-750"
+            aria-label="Close details panel"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="space-y-2 border-b border-slate-100 pb-5">
+          <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Description</h4>
+          <p className="text-sm leading-6 text-slate-700">
+            {safeDisplayText(item.description || item.title, "Review this scoped population and keep ownership, due date, evidence, and linked tests current.")}
+          </p>
+        </div>
+
+        <div className="space-y-2 border-b border-slate-100 pb-5">
+          <CompletionStatusControl
+            typeLabel="population"
+            isCompleted={isCompleted}
+            onComplete={() => updateOrganizationStatus("Completed")}
+            onReopen={() => updateOrganizationStatus("In Progress")}
+          />
+        </div>
+
+        <div className="space-y-3 border-b border-slate-100 pb-5">
+          <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Details</h4>
+          <div className="space-y-3 text-sm">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-500">Assigned</span>
+              <select
+                value={assignments.owner}
+                onChange={(event) => updateAssignment("owner", event.target.value)}
+                className="bg-transparent font-bold text-slate-800 outline-none cursor-pointer"
+              >
+                {employeesList.map((name) => (
+                  <option key={name} value={name}>{name}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-500">Due Date</span>
+              <input
+                type="date"
+                value={dueDate}
+                onChange={(event) => updateDueDate(event.target.value)}
+                className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-bold text-slate-700 outline-none"
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-slate-500">Category</span>
+              <span className="font-bold text-slate-800">{safeDisplayText(item.category, "Population Management")}</span>
+            </div>
+          </div>
+        </div>
+
+        {renderRelationshipExtras()}
+
+        <div className="space-y-3 border-b border-slate-100 pb-5">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Connected Tests</h4>
+            <button
+              type="button"
+              onClick={() => openLinkPicker("tests")}
+              className="rounded border border-slate-200 px-2 py-0.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+            >
+              Link
+            </button>
+          </div>
+          {renderLinkPicker("tests")}
+          {linkedItems.tests?.map((test) =>
+            renderLinkedCard("tests", test, "Test", {
+              badge: "Ready",
+              badgeClassName: "rounded bg-blue-50 px-2.5 py-0.5 text-[10px] font-black text-blue-700 uppercase",
+            })
+          )}
+          {!linkedItems.tests?.length && (
+            <p className="text-xs font-semibold text-slate-400 italic">No connected tests.</p>
+          )}
+        </div>
+
+        <div className="space-y-3 border-b border-slate-100 pb-5">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Mapped Controls</h4>
+            <button
+              type="button"
+              onClick={() => openLinkPicker("controls")}
+              className="rounded border border-slate-200 px-2 py-0.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+            >
+              Link
+            </button>
+          </div>
+          {renderLinkPicker("controls")}
+          {linkedItems.controls?.map((control) =>
+            renderLinkedCard("controls", control, "Control", { badge: "Implemented" })
+          )}
+          {!linkedItems.controls?.length && (
+            <p className="text-xs font-semibold text-slate-400 italic">No mapped controls.</p>
+          )}
+        </div>
+
+        <EvidenceManagementSection
+          context={buildEvidenceContext({ item, linkedItems, framework, frameworkBadge })}
+          records={evidenceRecords}
+          onRecordsChange={setEvidenceRecords}
+          onEvidenceChange={handleEvidenceChange}
+        />
+
+        <div className="space-y-3 border-b border-slate-100 pb-5">
+          <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">History</h4>
+          {comments.map((comment, index) => renderComment(comment, index))}
+          {!comments.length && (
+            <p className="py-2 text-center text-xs font-semibold text-slate-400">There are no comments yet</p>
+          )}
+        </div>
+
+        <div className="space-y-3">
+          <textarea
+            value={commentText}
+            onChange={(event) => setCommentText(event.target.value)}
+            placeholder="Write a comment..."
+            className="w-full min-h-20 rounded-lg border border-slate-200 p-3 text-sm text-slate-800 outline-none focus:border-blue-500"
+          />
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={addComment}
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white transition hover:bg-blue-700"
+            >
+              <Send size={16} />
+            </button>
+          </div>
+        </div>
+      </aside>
+    );
+  }
+
   if (item.type === "Policy") {
     const isReady = ["ready", "approved", "implemented", "complete", "completed"].includes(
       String(organizationStatus).toLowerCase()
@@ -6049,7 +6543,7 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
               </span>
             </div>
             <h2 className="text-xl font-black text-slate-950">
-              {item.title}
+              {safeDisplayText(item.title || item.name || item.id, "Policy")}
             </h2>
           </div>
           <button
@@ -6065,7 +6559,7 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
         <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-4">
           <h4 className="text-[10px] font-black uppercase tracking-wider text-blue-700">Mandatory Document</h4>
           <p className="mt-2 text-sm leading-6 text-slate-700">
-            {item.description || `Upload and maintain the ${item.title} document for the selected framework.`}
+            {safeDisplayText(item.description, `Upload and maintain the ${safeDisplayText(item.title || item.name || item.id, "selected")} document for the selected framework.`)}
           </p>
         </div>
 
@@ -6103,7 +6597,7 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
           </div>
           <div className="flex items-center justify-between">
             <span className="font-semibold text-slate-500">Category</span>
-            <span className="font-bold text-slate-800">{item.category || "Mandatory Docs"}</span>
+            <span className="font-bold text-slate-800">{safeDisplayText(item.category, "Mandatory Docs")}</span>
           </div>
         </div>
 
@@ -6124,8 +6618,8 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
                 <div key={file.id || file.name} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50/70 p-3">
                   <FileText size={16} className="text-blue-600" />
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-black text-slate-900">{file.name}</p>
-                    <p className="text-xs font-semibold text-slate-400">{file.uploadedAt || "Uploaded"}</p>
+                    <p className="truncate text-sm font-black text-slate-900">{safeDisplayText(file.name, "Document")}</p>
+                    <p className="text-xs font-semibold text-slate-400">{safeDisplayText(file.uploadedAt, "Uploaded")}</p>
                   </div>
                 </div>
               ))}
@@ -6142,8 +6636,8 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
           {linkedItems.controls?.length ? (
             linkedItems.controls.map((ctrl) => (
               <div key={ctrl.id} className="rounded-lg border border-slate-200 bg-white p-3">
-                <p className="text-sm font-black text-slate-900">{ctrl.title}</p>
-                <p className="mt-1 text-xs font-bold text-slate-400">{ctrl.id}</p>
+                <p className="text-sm font-black text-slate-900">{safeDisplayText(ctrl.title || ctrl.name || ctrl.id, "Control")}</p>
+                <p className="mt-1 text-xs font-bold text-slate-400">{safeDisplayText(ctrl.id)}</p>
               </div>
             ))
           ) : (
@@ -6170,7 +6664,7 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
             Library · {framework.name}
           </p>
           <h2 className="mt-2 text-xl font-black text-slate-950">
-            {item.id}
+            {safeDisplayText(item.id)}
           </h2>
         </div>
         <button
@@ -6184,6 +6678,339 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, onWor
       </div>
     </aside>
   );
+}
+
+function buildEvidenceContext({ item, linkedItems, framework, frameworkBadge }) {
+  const itemType = String(item.type || "").toLowerCase();
+  const linkedControlIds = normalizeRelationshipList(linkedItems.controls).map((control) => safeDisplayText(control.id)).filter(Boolean);
+  const itemLinkedControlIds = normalizeRelationshipList(item.linkedControls).map((controlId) => safeDisplayText(controlId)).filter(Boolean);
+  const controlIds = itemType === "control"
+    ? [safeDisplayText(item.id)].filter(Boolean)
+    : [...new Set([...linkedControlIds, ...itemLinkedControlIds])];
+
+  return {
+    frameworkId: framework?.id || framework?.slug || frameworkBadge,
+    domain: safeDisplayText(item.category || item.domain || item.annexDomain, "General"),
+    controlIds,
+    testId: itemType === "test" ? safeDisplayText(item.id) : "",
+    implementationId: safeDisplayText(item.id),
+  };
+}
+
+function CompletionStatusControl({ typeLabel, isCompleted, onComplete, onReopen }) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-black text-slate-900">
+            {isCompleted ? `This ${typeLabel} is completed` : `Mark this ${typeLabel} as completed`}
+          </h4>
+          <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">
+            {isCompleted
+              ? "Completed items appear as completed in the implementation table."
+              : "Use this when the work for this item is finished."}
+          </p>
+        </div>
+        {isCompleted ? (
+          <span className="shrink-0 rounded bg-emerald-50 px-2.5 py-1 text-[10px] font-black uppercase text-emerald-700">
+            Completed
+          </span>
+        ) : null}
+      </div>
+      <button
+        type="button"
+        onClick={isCompleted ? onReopen : onComplete}
+        className={`rounded-lg px-4 py-2 text-xs font-black transition ${
+          isCompleted
+            ? "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+            : "bg-emerald-600 text-white hover:bg-emerald-700"
+        }`}
+      >
+        {isCompleted ? "Mark as In Progress" : "Mark as Completed"}
+      </button>
+    </div>
+  );
+}
+
+function RelationshipSummaryBadges({ details, onNavigate }) {
+  const summaries = [
+    { label: "Policies", count: details.policies.length, type: "Policy", item: details.policies[0] },
+    { label: "Evidence", count: details.evidence.length, type: "Evidence", item: details.evidence[0] },
+    { label: "Tasks", count: details.tasks.length, type: "Task", item: details.tasks[0] },
+    { label: "Findings", count: details.auditFindings.length, type: "Audit", item: details.auditFindings[0] },
+  ];
+
+  if (!summaries.some((summary) => summary.count)) return null;
+
+  return (
+    <div className="grid grid-cols-2 gap-2 border-b border-slate-100 pb-5">
+      {summaries.map((summary) => (
+        <button
+          key={summary.label}
+          type="button"
+          disabled={!summary.count || !summary.item}
+          onClick={() => summary.item && onNavigate?.(summary.type, summary.item, "view")}
+          className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 text-left transition hover:bg-blue-50 disabled:cursor-default disabled:hover:bg-slate-50/70"
+        >
+          <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">{summary.label}</p>
+          <p className="mt-1 text-lg font-black text-slate-900">{summary.count}</p>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function RelatedSection({ title, items, emptyLabel, onOpen, readOnly = false }) {
+  return (
+    <div className="space-y-3 border-b border-slate-100 pb-5">
+      <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">{title}</h4>
+      {items.length ? (
+        items.slice(0, 4).map((relatedItem) => {
+          const body = relatedItem.description || relatedItem.summary || relatedItem.reason || relatedItem.status || relatedItem.id;
+          const titleText = safeDisplayText(relatedItem.title || relatedItem.name || relatedItem.id, "Related item");
+          const statusText = safeDisplayText(relatedItem.status);
+          const bodyText = safeDisplayText(body);
+          const content = (
+            <>
+              <div className="flex items-start justify-between gap-3">
+                <p className="text-sm font-black text-slate-900">{titleText}</p>
+                {statusText ? (
+                  <span className="shrink-0 rounded bg-slate-100 px-2 py-0.5 text-[10px] font-black uppercase text-slate-500">
+                    {statusText}
+                  </span>
+                ) : null}
+              </div>
+              {bodyText ? <p className="mt-1 line-clamp-2 text-xs font-semibold leading-5 text-slate-500">{bodyText}</p> : null}
+            </>
+          );
+
+          if (readOnly) {
+            return (
+              <div key={relatedItem.id || relatedItem.title} className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                {content}
+              </div>
+            );
+          }
+
+          return (
+            <button
+              key={relatedItem.id || relatedItem.title}
+              type="button"
+              onClick={() => onOpen?.(relatedItem)}
+              className="w-full rounded-lg border border-slate-200 bg-slate-50/50 p-3 text-left transition hover:bg-blue-50/40"
+            >
+              {content}
+            </button>
+          );
+        })
+      ) : (
+        <p className="text-xs font-semibold italic text-slate-400">{emptyLabel}</p>
+      )}
+    </div>
+  );
+}
+
+function buildImplementationRelationshipDetails({
+  item,
+  linkedItems,
+  data,
+  evidenceRecords,
+  audit,
+  tasks,
+  policies,
+  questionnaireResponses,
+  workspaceState,
+}) {
+  const relatedIds = collectRelatedIds(item, linkedItems, workspaceState);
+  const policyRows = uniqueById([
+    ...normalizeRelationshipList(linkedItems.policies),
+    ...normalizeRelationshipList(data.policies).filter((policy) => relatedIds.has(policy.id) || intersects(policy.linkedControls, relatedIds)),
+    ...normalizeRelationshipList(policies).filter((policy) => relatedIds.has(policy.id) || intersects(policy.linkedControls || policy.relatedControls, relatedIds)),
+  ]).map((policy) => ({
+    id: safeDisplayText(policy.id),
+    title: safeDisplayText(policy.title || policy.name || policy.id, "Policy"),
+    status: safeDisplayText(policy.status || policy.approvalStatus || "Policy"),
+    description: safeDisplayText(policy.description || policy.summary),
+  }));
+
+  return {
+    policies: policyRows,
+    evidence: collectRelatedEvidence(evidenceRecords, relatedIds, item),
+    questionnaire: collectQuestionnaireAnswers(questionnaireResponses, relatedIds, item),
+    tasks: collectRelatedTasks(tasks, relatedIds, item),
+    auditFindings: collectAuditFindings(audit, relatedIds, item),
+    activity: collectActivity(workspaceState, item),
+  };
+}
+
+function collectRelatedIds(item, linkedItems, workspaceState) {
+  return new Set([
+    item.id,
+    ...normalizeRelationshipList(item.linkedControls),
+    ...normalizeRelationshipList(item.linkedTests),
+    ...normalizeRelationshipList(item.linkedRisks),
+    ...normalizeRelationshipList(item.linkedPolicies),
+    ...normalizeRelationshipList(workspaceState?.linkedEvidenceIds),
+    ...normalizeRelationshipList(linkedItems.controls).map((control) => control.id),
+    ...normalizeRelationshipList(linkedItems.tests).map((test) => test.id),
+    ...normalizeRelationshipList(linkedItems.risks).map((risk) => risk.id),
+    ...normalizeRelationshipList(linkedItems.policies).map((policy) => policy.id),
+  ].filter(Boolean));
+}
+
+function collectRelatedEvidence(records = [], relatedIds, item) {
+  return records
+    .filter((record) => {
+      const metadata = record.metadata || {};
+      const mappings = Array.isArray(record.mappings) ? record.mappings : [];
+      const recordLinks = [
+        record.id,
+        metadata.linkedTest,
+        metadata.linkedImplementation,
+        metadata.linkedPolicy,
+        ...normalizeRelationshipList(metadata.linkedControls),
+        ...mappings.flatMap((mapping) => [mapping.controlId, mapping.testId, mapping.policyId]),
+      ].filter(Boolean);
+      return recordLinks.some((id) => relatedIds.has(id)) || metadata.linkedTest === item.id;
+    })
+    .map((record) => ({
+      id: safeDisplayText(record.id),
+      title: safeDisplayText(record.title || record.versions?.at(-1)?.fileName || record.id, "Evidence"),
+      status: safeDisplayText(record.evidenceStatus || "Evidence"),
+      description: safeDisplayText(record.description || record.metadata?.linkedDomain),
+    }));
+}
+
+function collectQuestionnaireAnswers(responses = {}, relatedIds, item) {
+  return Object.entries(responses || {})
+    .filter(([key, response]) => {
+      const haystack = [
+        key,
+        response?.questionId,
+        response?.controlId,
+        response?.testId,
+        response?.riskId,
+        ...normalizeRelationshipList(response?.linkedControls),
+        ...normalizeRelationshipList(response?.relatedControls),
+      ].filter(Boolean);
+      return haystack.some((id) => relatedIds.has(id)) || key.includes(item.id);
+    })
+    .map(([key, response]) => ({
+      id: safeDisplayText(key),
+      title: safeDisplayText(response?.question || response?.label || key, "Questionnaire answer"),
+      status: safeDisplayText(response?.answer || response?.status || "Answer"),
+      description: safeDisplayText(response?.notes || response?.reason),
+    }));
+}
+
+function collectRelatedTasks(tasks = [], relatedIds, item) {
+  return (tasks || [])
+    .filter((task) => {
+      const taskLinks = [
+        task.id,
+        task.itemId,
+        task.controlId,
+        task.testId,
+        task.policyId,
+        ...normalizeRelationshipList(task.linkedControls),
+      ].filter(Boolean);
+      return taskLinks.some((id) => relatedIds.has(id)) || task.itemId === item.id;
+    })
+    .map((task) => ({
+      id: safeDisplayText(task.id),
+      title: safeDisplayText(task.title || task.name || task.id, "Task"),
+      status: safeDisplayText(task.status || "Open"),
+      description: safeDisplayText(task.description || task.dueDate),
+    }));
+}
+
+function collectAuditFindings(audit, relatedIds, item) {
+  const findings = [
+    ...normalizeRelationshipList(audit?.findings),
+    ...normalizeRelationshipList(audit?.openFindings),
+    ...normalizeRelationshipList(audit?.gaps),
+    ...normalizeRelationshipList(audit?.missingEvidence),
+  ];
+
+  return findings
+    .filter((finding) => {
+      const findingLinks = [
+        finding.id,
+        finding.relatedItemId,
+        finding.itemId,
+        finding.controlId,
+        finding.testId,
+        ...normalizeRelationshipList(finding.linkedControls),
+      ].filter(Boolean);
+      return findingLinks.some((id) => relatedIds.has(id)) || finding.relatedItemId === item.id;
+    })
+    .map((finding) => ({
+      id: safeDisplayText(finding.id || `${safeDisplayText(finding.relatedItemId || item.id)}-${safeDisplayText(finding.title || finding.reason || "finding")}`),
+      relatedItemId: safeDisplayText(finding.relatedItemId || finding.itemId || finding.controlId || item.id),
+      title: safeDisplayText(finding.title || finding.name || finding.reason || "Audit finding"),
+      status: safeDisplayText(finding.status || finding.severity || "Open"),
+      description: safeDisplayText(finding.description || finding.summary),
+      type: safeDisplayText(finding.type || finding.itemType || "Audit"),
+    }));
+}
+
+function collectActivity(workspaceState, item) {
+  return [
+    ...normalizeRelationshipList(workspaceState?.timeline),
+    ...normalizeRelationshipList(item.activityTimeline),
+  ].map((activity, index) => ({
+    id: safeDisplayText(activity.id || `${item.id}-activity-${index}`),
+    title: safeDisplayText(activity.label || activity.title || activity, "Activity"),
+    status: safeDisplayText(activity.timestamp || activity.createdAt || "Activity"),
+    description: safeDisplayText(activity.description),
+  }));
+}
+
+function auditFindingToItemType(finding) {
+  return finding.type && finding.type !== "Audit" ? finding.type : "Audit";
+}
+
+function uniqueById(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    if (!item?.id || seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+function intersects(values = [], relatedIds) {
+  return normalizeRelationshipList(values).some((value) => relatedIds.has(value));
+}
+
+function normalizeRelationshipList(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (value && typeof value === "object") return Object.values(value).filter(Boolean);
+  if (typeof value === "string") {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function safeDisplayText(value, fallback = "") {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value instanceof Date) return value.toLocaleString();
+  if (Array.isArray(value)) return value.map((item) => safeDisplayText(item)).filter(Boolean).join(", ") || fallback;
+  if (typeof value === "object") {
+    return (
+      safeDisplayText(value.label) ||
+      safeDisplayText(value.title) ||
+      safeDisplayText(value.name) ||
+      safeDisplayText(value.id) ||
+      fallback
+    );
+  }
+  return fallback;
 }
 
 
@@ -6264,13 +7091,42 @@ function renderStatusPill(row, defaultApplicability, workspaceData) {
   if (status === "not_applicable" || status === "not applicable") {
     return <RiskPill tone="Medium">Not Applicable</RiskPill>;
   }
-  if (["complete", "completed", "implemented", "approved"].includes(status)) {
-    return <RiskPill tone="Low">Implemented</RiskPill>;
-  }
   if (defaultApplicability === "Not applicable") {
     return <RiskPill tone="Medium">Not Applicable</RiskPill>;
   }
   return <RiskPill>Applicable</RiskPill>;
+}
+
+function renderProgressStatusPill(row, workspaceData) {
+  const progressStatus = getProgressStatus(row, workspaceData);
+  const tone = progressStatus === "Completed" ? "Low" : progressStatus === "Delayed" ? "High" : "Default";
+  return <RiskPill tone={tone}>{progressStatus}</RiskPill>;
+}
+
+function getProgressStatus(row, workspaceData) {
+  const saved = (workspaceData && workspaceData[row.id]) || {};
+  const rawStatus = String(saved.status || row.status || "").toLowerCase().trim();
+
+  if (["complete", "completed", "implemented", "approved"].includes(rawStatus)) {
+    return "Completed";
+  }
+
+  const dueDateValue = saved.dueDate || row.dueDate;
+  if (isPastDue(dueDateValue)) {
+    return "Delayed";
+  }
+
+  return "In Progress";
+}
+
+function isPastDue(value) {
+  if (!value) return false;
+  const due = new Date(value);
+  if (Number.isNaN(due.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  due.setHours(0, 0, 0, 0);
+  return due < today;
 }
 
 function getMandatoryDocStatus(document, workspaceData) {
@@ -6342,6 +7198,64 @@ function compareTestRows(a, b, sortBy) {
   });
 }
 
+const linkedStateKeyByFamily = {
+  risks: "linkedRisks",
+  controls: "linkedControls",
+  tests: "linkedTests",
+  policies: "linkedPolicies",
+  populations: "linkedPopulations",
+};
+
+const linkedItemTypeByFamily = {
+  risks: "Risk",
+  controls: "Control",
+  tests: "Test",
+  policies: "Policy",
+  populations: "Population",
+};
+
+function singularRelationshipLabel(family) {
+  return {
+    risks: "Risk",
+    controls: "Control",
+    tests: "Test",
+    policies: "Policy",
+    populations: "Population",
+  }[family] || "Item";
+}
+
+function resolveLinkedItemsWithOverrides(baseLinkedItems, data, workspaceState) {
+  return Object.entries(linkedStateKeyByFamily).reduce((resolved, [family, stateKey]) => {
+    const hasOverride = Object.prototype.hasOwnProperty.call(workspaceState || {}, stateKey);
+    if (!hasOverride) return resolved;
+
+    return {
+      ...resolved,
+      [family]: resolveWorkspaceItemsByIds(workspaceState[stateKey], data?.[family], linkedItemTypeByFamily[family]),
+    };
+  }, { ...baseLinkedItems });
+}
+
+function resolveWorkspaceItemsByIds(ids, rows = [], type) {
+  const rowsById = new Map(
+    normalizeRelationshipList(rows).map((row) => [safeDisplayText(row.id || row.name), row])
+  );
+
+  return normalizeRelationshipList(ids)
+    .map((value) => safeDisplayText(typeof value === "object" && value !== null ? value.id || value.name : value))
+    .filter(Boolean)
+    .map((id) => rowsById.get(id))
+    .filter(Boolean)
+    .map((row) => createWorkspaceItem(type, row));
+}
+
+function getSavedLinkedOverrides(workspaceState) {
+  return Object.values(linkedStateKeyByFamily).reduce((overrides, stateKey) => {
+    if (!Object.prototype.hasOwnProperty.call(workspaceState || {}, stateKey)) return overrides;
+    return { ...overrides, [stateKey]: workspaceState[stateKey] };
+  }, {});
+}
+
 function createWorkspaceItem(type, item) {
   const id = item.id || item.name;
   const title = item.title || item.name;
@@ -6368,6 +7282,7 @@ function createWorkspaceItem(type, item) {
     linkedTests: item.linkedTests || [],
     linkedControls: item.linkedControls || [],
     linkedPolicies: item.linkedPolicies || [],
+    linkedPopulations: item.linkedPopulations || [],
     evidence,
     requiredEvidence: item.requiredEvidence || [],
     comments: item.comments ?? "",

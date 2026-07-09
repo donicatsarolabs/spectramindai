@@ -144,7 +144,7 @@ export default function EvidenceManagementSection({
         <div>
           <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Evidence</h4>
           <p className="mt-1 text-xs font-semibold text-slate-500">
-            Upload or link evidence for this test.
+            Add or link evidence for this record.
           </p>
         </div>
         <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-black ${healthStyles[health]}`}>
@@ -169,7 +169,7 @@ export default function EvidenceManagementSection({
           onClick={() => inputRef.current?.click()}
           className="mt-3 rounded-lg bg-blue-600 px-4 py-2 text-xs font-black text-white transition hover:bg-blue-700"
         >
-          Upload Evidence
+          Add Evidence
         </button>
         <input
           ref={inputRef}
@@ -268,7 +268,7 @@ export default function EvidenceManagementSection({
                 <Metadata label="Uploaded By" value={currentVersion?.uploadedByName || record.metadata?.uploadedBy || "User"} />
                 <Metadata label="Linked Framework" value={record.metadata?.linkedFramework || context.frameworkId} />
                 <Metadata label="Linked Domain" value={record.metadata?.linkedDomain || context.domain || "General"} />
-                <Metadata label="Linked Controls" value={(record.metadata?.linkedControls || context.controlIds || []).join(", ")} />
+                <Metadata label="Linked Controls" value={toTextList(record.metadata?.linkedControls || context.controlIds).join(", ")} />
                 <Metadata label="Linked Test" value={record.metadata?.linkedTest || context.testId} />
                 <Metadata label="Status" value={record.evidenceStatus || "Pending Review"} />
               </div>
@@ -338,7 +338,7 @@ export default function EvidenceManagementSection({
               <details className="mt-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
                 <summary className="cursor-pointer text-xs font-black uppercase tracking-wider text-slate-500">Version History</summary>
                 <div className="mt-2 space-y-2">
-                  {(record.versions || []).map((version) => (
+                  {toArray(record.versions).map((version) => (
                     <div key={version.id} className="flex items-center justify-between gap-3 rounded bg-white p-2 text-xs">
                       <span className="min-w-0 truncate font-bold text-slate-700">
                         v{version.versionNumber} · {version.fileName}
@@ -358,7 +358,7 @@ export default function EvidenceManagementSection({
               <details className="mt-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
                 <summary className="cursor-pointer text-xs font-black uppercase tracking-wider text-slate-500">Audit History</summary>
                 <div className="mt-2 space-y-2">
-                  {(record.auditHistory || []).map((event) => (
+                  {toArray(record.auditHistory).map((event) => (
                     <p key={event.id} className="text-xs font-semibold text-slate-600">
                       {event.action} by {event.actorName || event.actorId || "User"} · {formatDate(event.createdAt)}
                     </p>
@@ -386,7 +386,7 @@ export default function EvidenceManagementSection({
                     Add
                   </button>
                 </div>
-                {(record.comments || []).map((item) => (
+                {toArray(record.comments).map((item) => (
                   <p key={item.id} className="rounded bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
                     {item.text} · {item.userName}
                   </p>
@@ -398,7 +398,7 @@ export default function EvidenceManagementSection({
 
         {!linkedEvidence.length && (
           <p className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-xs font-black text-rose-700">
-            No evidence uploaded for this test.
+            No evidence uploaded yet.
           </p>
         )}
       </div>
@@ -418,6 +418,25 @@ export default function EvidenceManagementSection({
 
 function linkedEvidenceFrom(records, context) {
   return records.filter((record) => !record.deletedAt && evidenceMatchesContext(record, context));
+}
+
+function toArray(value) {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object") return Object.values(value);
+  if (value) return [value];
+  return [];
+}
+
+function toTextList(value) {
+  return toArray(value)
+    .map((item) => {
+      if (item === null || item === undefined) return "";
+      if (typeof item === "string") return item;
+      if (typeof item === "number" || typeof item === "boolean") return String(item);
+      if (typeof item === "object") return item.id || item.name || item.title || "";
+      return "";
+    })
+    .filter(Boolean);
 }
 
 function Metadata({ label, value }) {
