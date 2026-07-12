@@ -5,28 +5,27 @@ import {
   FileText,
   UploadCloud,
 } from "lucide-react";
-import { useMemo, useState } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import AppShell from "../components/layout/AppShell";
 import { loadQuestionnaireResponses } from "../data/questionnaireEngine";
 import { useQuestionnaireSections } from "../core/adapters/useQuestionnaireData";
 import { saveOrgQuestionnaireAnswers } from "../core/adapters/useOrganizationStore";
 import {
-  DEFAULT_FRAMEWORK_ID,
   ISO27001_FRAMEWORK_ID,
-  getFrameworkLibrary,
   resolveFrameworkId,
 } from "../core/engines/framework-engine/frameworkRegistry";
 import ActiveFrameworkRequired from "../framework/ActiveFrameworkRequired";
-import { useFrameworkWorkspace } from "../framework/FrameworkWorkspaceContext";
-
-const FRAMEWORK_SLUGS = {
-  [DEFAULT_FRAMEWORK_ID]: "soc-2",
-  [ISO27001_FRAMEWORK_ID]: "iso-27001",
-};
+import { frameworkHasLibrary, useFrameworkWorkspace } from "../framework/FrameworkWorkspaceContext";
 
 export default function Questionnaire() {
-  const { activeFramework } = useFrameworkWorkspace();
+  const frameworkWorkspace = useFrameworkWorkspace();
+  const { activeFramework } = frameworkWorkspace;
+  const navigate = useNavigate();
+  const handleFrameworkSelect = (framework) => {
+    frameworkWorkspace.selectFramework(framework.id);
+    navigate(`/questionnaire?framework=${framework.slug}`);
+  };
 
   if (!activeFramework) {
     return <ActiveFrameworkRequired />;
@@ -35,80 +34,206 @@ export default function Questionnaire() {
   if (activeFramework.slug === "cmmc") {
     return (
       <AppShell>
-        <div className="rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <h1 className="text-2xl font-black text-slate-900 dark:text-white">
-            This framework uses its built-in assessment.
-          </h1>
-          <Link
-            to="/cmmc"
-            className="mt-5 inline-flex items-center justify-center rounded-lg bg-primary px-5 py-3 font-semibold text-white transition hover:bg-blue-700"
-          >
-            Open CMMC Assessment
-          </Link>
+        <div className="max-w-3xl space-y-5">
+          <QuestionnaireHeader
+            activeFramework={activeFramework}
+            frameworks={frameworkWorkspace.frameworks}
+            onFrameworkSelect={handleFrameworkSelect}
+          />
+          <div className="rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <h1 className="text-2xl font-black text-slate-900 dark:text-white">
+              This framework uses its built-in assessment.
+            </h1>
+            <Link
+              to="/cmmc"
+              className="mt-5 inline-flex items-center justify-center rounded-lg bg-primary px-5 py-3 font-semibold text-white transition hover:bg-blue-700"
+            >
+              Open CMMC Assessment
+            </Link>
+          </div>
         </div>
       </AppShell>
     );
   }
 
-  return <QuestionnaireContent key={activeFramework.id} activeFramework={activeFramework} />;
+  return (
+    <QuestionnaireContent
+      key={activeFramework.id}
+      activeFramework={activeFramework}
+      frameworks={frameworkWorkspace.frameworks}
+      onFrameworkSelect={handleFrameworkSelect}
+    />
+  );
 }
 
-function QuestionnaireContent({ activeFramework }) {
+function QuestionnaireContent({ activeFramework, frameworks, onFrameworkSelect }) {
   const location = useLocation();
   const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const selectedFrameworkId = resolveFrameworkId(activeFramework.id) || activeFramework.id;
   const selectedQuestionnaireId = params.get("questionnaire");
   const activeSections = useQuestionnaireSections(selectedFrameworkId);
+  const isISO27001 = selectedFrameworkId === ISO27001_FRAMEWORK_ID;
 
   return (
     <AppShell>
-      {selectedQuestionnaireId ? (
-        <QuestionnaireDetail
-          key={`${selectedFrameworkId}:${selectedQuestionnaireId}`}
+      {isISO27001 ? (
+        <SectionQuestionnaire
+          key={`${selectedFrameworkId}:${selectedQuestionnaireId || "landing"}`}
           frameworkId={selectedFrameworkId}
-          sectionId={selectedQuestionnaireId}
-          sections={activeSections}
-        />
-      ) : (
-        <QuestionnaireLanding
           activeFramework={activeFramework}
           sections={activeSections}
+          selectedQuestionnaireId={selectedQuestionnaireId}
+          frameworks={frameworks}
+          onFrameworkSelect={onFrameworkSelect}
+        />
+      ) : (
+        <CombinedQuestionnaire
+          key={selectedFrameworkId}
+          frameworkId={selectedFrameworkId}
+          activeFramework={activeFramework}
+          sections={activeSections}
+          frameworks={frameworks}
+          onFrameworkSelect={onFrameworkSelect}
         />
       )}
     </AppShell>
   );
 }
 
-function QuestionnaireLanding({ activeFramework, sections }) {
-  const frameworkGroups = [
-    {
-      id: activeFramework.id,
-      title: activeFramework.name,
-      sections: sections ?? [],
-    },
-  ];
+function CombinedQuestionnaire({ frameworkId, activeFramework, sections, frameworks, onFrameworkSelect }) {
+  const [responses, setResponses] = useState(() => loadQuestionnaireResponses(frameworkId));
+  const questionRefs = useRef({});
+  const questions = useMemo(() => flattenQuestionnaireSections(sections), [sections]);
+  const answerableQuestions = useMemo(() => collectAnswerableQuestions(questions), [questions]);
+  const answeredCount = answerableQuestions.filter((question) => isQuestionAnswered(question, responses)).length;
+  const totalCount = answerableQuestions.length;
+  const progress = totalCount ? Math.round((answeredCount / totalCount) * 100) : 0;
+  const nextQuestion = questions.find((question) => !isQuestionGroupAnswered(question, responses));
+
+  const updateResponse = (key, value) => {
+    const nextResponses = { ...responses, [key]: value };
+    setResponses(nextResponses);
+    saveOrgQuestionnaireAnswers(nextResponses, frameworkId);
+  };
+
+  const goToNextQuestion = () => {
+    if (!nextQuestion) return;
+    questionRefs.current[nextQuestion.key]?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
 
   return (
     <div className="max-w-3xl space-y-5">
-      <header>
-        <h1 className="text-2xl font-bold leading-7 tracking-normal text-slate-950">Questionnaires</h1>
-        <p className="mt-2 text-xs font-medium leading-5 text-slate-500">
-          Please complete the questions below before a compliance expert can start working on your account.
-        </p>
-      </header>
+      <QuestionnaireHeader
+        activeFramework={activeFramework}
+        frameworks={frameworks}
+        onFrameworkSelect={onFrameworkSelect}
+      />
 
-      <div className="space-y-4">
-        {frameworkGroups.map((framework) => (
-          <FrameworkQuestionnaireGroup key={framework.id} framework={framework} />
-        ))}
-      </div>
+      <section className="rounded-lg border border-white/75 bg-white/70 p-5 shadow-lg shadow-slate-900/5 backdrop-blur">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm font-black text-slate-950">
+              Overall progress
+            </p>
+            <p className="mt-1 text-xs font-semibold text-slate-500">
+              {answeredCount} / {totalCount} questions answered
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={goToNextQuestion}
+            disabled={!nextQuestion}
+            className="inline-flex h-10 items-center justify-center rounded-lg bg-amber-700 px-5 text-sm font-black text-white shadow-sm shadow-amber-700/20 transition hover:bg-amber-800 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
+          >
+            {nextQuestion ? "Next" : "Completed"}
+          </button>
+        </div>
+
+        <div className="mt-4 flex items-center gap-3">
+          <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-amber-700 transition-all duration-300"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          <span className="w-10 text-right text-xs font-black text-slate-700">{progress}%</span>
+        </div>
+
+        {!nextQuestion && totalCount > 0 ? (
+          <CompletionImplementationLink activeFramework={activeFramework} className="mt-4" />
+        ) : null}
+      </section>
+
+      <section className="space-y-4">
+        {questions.length ? (
+          questions.map((question, index) => (
+            <QuestionCard
+              key={question.key}
+              refCallback={(node) => {
+                if (node) questionRefs.current[question.key] = node;
+              }}
+              question={question}
+              questionNumber={index + 1}
+              responses={responses}
+              updateResponse={updateResponse}
+            />
+          ))
+        ) : (
+          <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-4 py-3 text-xs font-semibold leading-5 text-stone-500">
+            Questionnaires are not required for this framework.
+          </div>
+        )}
+      </section>
     </div>
   );
 }
 
-function FrameworkQuestionnaireGroup({ framework }) {
-  const [responses] = useState(() => loadQuestionnaireResponses(framework.id));
+function SectionQuestionnaire({
+  frameworkId,
+  activeFramework,
+  sections,
+  selectedQuestionnaireId,
+  frameworks,
+  onFrameworkSelect,
+}) {
+  const selectedSection = selectedQuestionnaireId
+    ? sections.find((section) => section.id === selectedQuestionnaireId) ?? sections[0]
+    : null;
+
+  if (selectedSection) {
+    return (
+      <SectionQuestionnaireDetail
+        frameworkId={frameworkId}
+        activeFramework={activeFramework}
+        section={selectedSection}
+        frameworks={frameworks}
+        onFrameworkSelect={onFrameworkSelect}
+      />
+    );
+  }
+
+  return (
+    <div className="max-w-3xl space-y-5">
+      <QuestionnaireHeader
+        activeFramework={activeFramework}
+        frameworks={frameworks}
+        onFrameworkSelect={onFrameworkSelect}
+        description="Please complete each questionnaire section before a compliance expert can start working on your account."
+      />
+
+      <SectionQuestionnaireGroup
+        frameworkId={frameworkId}
+        activeFramework={activeFramework}
+        sections={sections}
+      />
+    </div>
+  );
+}
+
+function SectionQuestionnaireGroup({ frameworkId, activeFramework, sections }) {
+  const [responses] = useState(() => loadQuestionnaireResponses(frameworkId));
   const [isExpanded, setIsExpanded] = useState(true);
+  const allSectionsComplete = sections.length > 0 && sections.every((section) => getSectionStatus(section, responses).completed);
 
   return (
     <section className="space-y-2">
@@ -122,20 +247,19 @@ function FrameworkQuestionnaireGroup({ framework }) {
           size={13}
           className={`text-slate-500 transition-transform ${isExpanded ? "rotate-180" : ""}`}
         />
-        <h2 className="text-base font-bold leading-6 tracking-normal text-slate-950">{framework.title}</h2>
+        <h2 className="text-base font-bold leading-6 tracking-normal text-slate-950">{activeFramework.name}</h2>
       </button>
 
       {isExpanded ? (
         <div className="overflow-hidden rounded-md border border-amber-200 bg-amber-50/70">
-          {framework.sections.length ? (
-            framework.sections.map((section) => {
+          {sections.length ? (
+            sections.map((section) => {
               const status = getSectionStatus(section, responses);
-              const slug = FRAMEWORK_SLUGS[framework.id] ?? framework.id;
 
               return (
                 <Link
                   key={section.id}
-                  to={`/questionnaire?framework=${slug}&questionnaire=${section.id}`}
+                  to={`/questionnaire?framework=${activeFramework.slug}&questionnaire=${section.id}`}
                   className="flex items-center justify-between gap-4 border-b border-amber-100 bg-amber-50/50 px-4 py-3 transition last:border-b-0 hover:bg-amber-50"
                 >
                   <span>
@@ -166,33 +290,16 @@ function FrameworkQuestionnaireGroup({ framework }) {
           )}
         </div>
       ) : null}
+      {allSectionsComplete ? (
+        <CompletionImplementationLink activeFramework={activeFramework} />
+      ) : null}
     </section>
   );
 }
 
-function QuestionnaireDetail({ frameworkId, sectionId, sections }) {
-  const section = sections.find((candidate) => candidate.id === sectionId) ?? sections[0];
-  const frameworkName =
-    getFrameworkLibrary(frameworkId)?.framework?.shortName ||
-    getFrameworkLibrary(frameworkId)?.framework?.name ||
-    "Framework";
+function SectionQuestionnaireDetail({ frameworkId, activeFramework, section, frameworks, onFrameworkSelect }) {
   const [responses, setResponses] = useState(() => loadQuestionnaireResponses(frameworkId));
   const [isQuestionsExpanded, setIsQuestionsExpanded] = useState(true);
-
-  if (!section) {
-    return (
-      <div className="max-w-3xl">
-        <Link to="/questionnaire" className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600 hover:text-blue-700">
-          <ArrowLeft size={14} />
-          Back to Questionnaires
-        </Link>
-        <div className="mt-6 rounded-md border border-amber-200 bg-amber-50/60 p-4 text-xs font-semibold text-slate-600">
-          No questionnaire is configured for {frameworkName}.
-        </div>
-      </div>
-    );
-  }
-
   const updateResponse = (key, value) => {
     const nextResponses = { ...responses, [key]: value };
     setResponses(nextResponses);
@@ -203,10 +310,16 @@ function QuestionnaireDetail({ frameworkId, sectionId, sections }) {
 
   return (
     <div className="max-w-3xl space-y-4">
-      <header>
-        <h1 className="text-2xl font-bold leading-7 tracking-normal text-slate-950">{section.title}</h1>
+      <header className="space-y-4">
+        <QuestionnaireHeader
+          activeFramework={activeFramework}
+          frameworks={frameworks}
+          onFrameworkSelect={onFrameworkSelect}
+          title={section.title}
+          description="Complete this questionnaire section, then return to choose the next section."
+        />
         <Link
-          to="/questionnaire"
+          to={`/questionnaire?framework=${activeFramework.slug}`}
           className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-slate-500 hover:text-blue-700"
         >
           <ArrowLeft size={13} />
@@ -217,12 +330,16 @@ function QuestionnaireDetail({ frameworkId, sectionId, sections }) {
       <div className="flex items-center gap-2">
         <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
           <div
-            className="h-full rounded-full bg-gradient-to-r from-[#080047] via-[#342cff] to-[#c4f7ff] transition-all duration-300"
+            className="h-full rounded-full bg-amber-700 transition-all duration-300"
             style={{ width: `${progress}%` }}
           />
         </div>
         <span className="text-xs font-bold text-slate-700">{progress}%</span>
       </div>
+
+      {status.completed ? (
+        <CompletionImplementationLink activeFramework={activeFramework} />
+      ) : null}
 
       <section className="space-y-3">
         <button
@@ -256,11 +373,119 @@ function QuestionnaireDetail({ frameworkId, sectionId, sections }) {
   );
 }
 
-function QuestionCard({ question, responses, updateResponse }) {
+function QuestionnaireHeader({
+  activeFramework,
+  frameworks = [],
+  onFrameworkSelect,
+  title = "Questionnaires",
+  description = "All questionnaire questions are shown below with one combined progress tracker.",
+}) {
+  return (
+    <header className="rounded-lg border border-white/75 bg-white/70 p-5 shadow-lg shadow-slate-900/5 backdrop-blur-2xl">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-black uppercase tracking-widest text-amber-700">
+            Questionnaire
+          </p>
+          <h1 className="mt-2 text-3xl font-black tracking-normal text-slate-950">
+            {title}
+          </h1>
+          <p className="mt-2 text-sm font-semibold leading-5 text-slate-500">
+            {activeFramework.name}
+          </p>
+          <p className="mt-1 max-w-2xl text-xs font-medium leading-5 text-slate-500">
+            {description}
+          </p>
+        </div>
+
+        <FrameworkSwitcher
+          activeSlug={activeFramework.slug}
+          frameworks={frameworks}
+          onSelect={onFrameworkSelect}
+        />
+      </div>
+    </header>
+  );
+}
+
+function FrameworkSwitcher({ activeSlug, frameworks = [], onSelect }) {
+  const questionnaireFrameworks = getQuestionnaireFrameworkOptions(frameworks);
+
+  return (
+    <div className="inline-flex w-fit flex-wrap items-center gap-1 rounded-lg border border-slate-200/80 bg-white/75 p-1 shadow-sm lg:flex-nowrap lg:justify-end">
+      {questionnaireFrameworks.map((framework) => {
+        const isActive = framework.slug === activeSlug;
+
+        return (
+          <button
+            key={framework.id}
+            type="button"
+            onClick={() => onSelect(framework)}
+            className={`inline-flex h-9 min-w-[88px] items-center justify-center whitespace-nowrap rounded-md px-3 text-sm font-black transition ${
+              isActive
+                ? "bg-amber-700 text-white shadow-sm shadow-amber-700/20"
+                : "text-slate-600 hover:bg-white hover:text-slate-950"
+            }`}
+            aria-pressed={isActive}
+          >
+            {framework.shortName || framework.name}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function getQuestionnaireFrameworkOptions(frameworks = []) {
+  return frameworks.filter((framework) => framework.slug === "cmmc" || frameworkHasLibrary(framework.id));
+}
+
+function CompletionImplementationLink({ activeFramework, className = "" }) {
+  const target = activeFramework.slug === "cmmc" ? "/cmmc" : `/implementation?framework=${activeFramework.slug}`;
+
+  return (
+    <div className={`rounded-lg border border-emerald-200 bg-emerald-50/70 p-4 ${className}`}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-black text-emerald-900">
+            Questionnaire complete
+          </p>
+          <p className="mt-1 text-xs font-semibold text-emerald-700">
+            Continue into implementation for {activeFramework.name}.
+          </p>
+        </div>
+        <Link
+          to={target}
+          className="inline-flex h-10 items-center justify-center rounded-lg bg-emerald-700 px-4 text-sm font-black text-white shadow-sm shadow-emerald-700/20 transition hover:bg-emerald-800"
+        >
+          Open Implementation
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function QuestionCard({ question, questionNumber, refCallback, responses, updateResponse }) {
   const answered = isQuestionAnswered(question, responses);
 
   return (
-    <article className="rounded-md border border-sky-100 bg-sky-50/70 p-4 shadow-sm shadow-slate-900/5">
+    <article ref={refCallback} className="rounded-lg border border-sky-100 bg-sky-50/70 p-4 shadow-sm shadow-slate-900/5 scroll-mt-28">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b border-sky-100 pb-3">
+        <div>
+          <p className="text-xs font-black uppercase tracking-widest text-amber-700">
+            Question {questionNumber}
+          </p>
+          {question.sectionTitle ? (
+            <p className="mt-1 text-xs font-semibold text-slate-500">{question.sectionTitle}</p>
+          ) : null}
+        </div>
+        {isQuestionGroupAnswered(question, responses) ? (
+          <span className="inline-flex items-center gap-1 rounded-md bg-white px-2.5 py-1 text-xs font-black text-blue-700">
+            <Check size={13} />
+            Answered
+          </span>
+        ) : null}
+      </div>
       <QuestionPrompt question={question} answered={answered} />
       <QuestionInput question={question} responses={responses} updateResponse={updateResponse} />
 
@@ -459,9 +684,35 @@ function createEmptySystem(fields) {
   return fields.reduce((system, field) => ({ ...system, [field]: "" }), {});
 }
 
+function flattenQuestionnaireSections(sections = []) {
+  return sections.flatMap((section) =>
+    (section.questions || []).map((question) => ({
+      ...question,
+      sectionId: section.id,
+      sectionTitle: section.title,
+    }))
+  );
+}
+
+function collectAnswerableQuestions(questions = []) {
+  return questions
+    .flatMap((question) => [
+      question,
+      ...(question.subQuestions || []),
+    ])
+    .filter((question) => question.required !== false);
+}
+
+function isQuestionGroupAnswered(question, responses) {
+  return collectAnswerableQuestions([question])
+    .filter((candidate) => candidate.required !== false)
+    .every((candidate) => isQuestionAnswered(candidate, responses));
+}
+
 function getSectionStatus(section, responses) {
-  const total = section.questions.length;
-  const answered = section.questions.filter((question) => isQuestionAnswered(question, responses)).length;
+  const questions = collectAnswerableQuestions(section.questions || []);
+  const total = questions.length;
+  const answered = questions.filter((question) => isQuestionAnswered(question, responses)).length;
   return {
     total,
     answered,

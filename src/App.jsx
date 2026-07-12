@@ -94,18 +94,22 @@ function App() {
         <Route path="/profile" element={<Profile />} />
         <Route path="/profile-settings" element={<ProfileSettings />} />
         <Route path="/frameworks" element={<Frameworks />} />
-        <Route path="/evidence" element={<Evidence />} />
-        <Route path="/risks" element={<Navigate to="/implementation?itemType=Risk" replace />} />
-        <Route path="/vendors" element={<Vendors />} />
-        <Route path="/questionnaire" element={<Questionnaire />} />
-        <Route path="/implementation" element={<Implementation />} />
-        <Route path="/implementation/mandatory-documents/:documentId/upload" element={<MandatoryDocumentUpload />} />
-        <Route path="/training" element={<Training />} />
-        <Route path="/employees" element={<Employees />} />
-        <Route path="/integrations" element={<Integrations />} />
-        <Route path="/audits" element={<Audits />} />
-        <Route path="/comments" element={<Comments />} />
-        <Route path="/tasks" element={<Tasks />} />
+        <Route element={<ActiveFrameworkOutlet />}>
+          <Route path="/evidence" element={<Evidence />} />
+          <Route path="/risks" element={<Navigate to="/implementation?itemType=Risk" replace />} />
+          <Route path="/vendors" element={<Vendors />} />
+          <Route path="/questionnaire" element={<Questionnaire />} />
+          <Route path="/implementation" element={<Implementation />} />
+          <Route path="/implementation/mandatory-documents/:documentId/upload" element={<MandatoryDocumentUpload />} />
+          <Route path="/training" element={<Training />} />
+          <Route path="/employees" element={<Employees />} />
+          <Route path="/integrations" element={<Integrations />} />
+          <Route path="/audits" element={<Audits />} />
+          <Route path="/comments" element={<Comments />} />
+          <Route path="/tasks" element={<Tasks />} />
+          <Route path="/policies" element={<Policies />} />
+          <Route path="/assistant" element={<Assistant />} />
+        </Route>
         <Route path="/trust-center" element={<TrustCenter />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/soc2" element={<SOC2 />} />
@@ -116,8 +120,6 @@ function App() {
             <Route key={path} path={path} element={<Component />} />
           ))}
         </Route>
-        <Route path="/policies" element={<Policies />} />
-        <Route path="/assistant" element={<Assistant />} />
         <Route path="/dashboard" element={<Dashboard />} />
       </Route>
 

@@ -16,12 +16,14 @@ import {
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { APP_NAME, useOrganizationLogo } from "../../core/adapters/useOrganizationBranding";
+import { useFrameworkWorkspace } from "../../framework/FrameworkWorkspaceContext";
 
 const dashboardItem = { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard };
 
-const complianceItems = [
+const frameworkItem = { name: "Framework", path: "/frameworks", icon: ShieldCheck };
+
+const frameworkScopedComplianceItems = [
   { name: "AI Assistant", path: "/assistant", icon: Bot },
-  { name: "Framework", path: "/frameworks", icon: ShieldCheck },
   { name: "Questionnaire", path: "/questionnaire", icon: ClipboardList },
   { name: "Implementation", path: "/implementation", icon: Wrench },
   { name: "Policies", path: "/policies", icon: FileText },
@@ -41,6 +43,10 @@ const workspaceItems = [
 export default function Sidebar() {
   const location = useLocation();
   const organizationLogo = useOrganizationLogo();
+  const { activeFramework } = useFrameworkWorkspace();
+  const complianceItems = activeFramework
+    ? [frameworkItem, ...frameworkScopedComplianceItems]
+    : [frameworkItem];
 
   return (
     <aside className="sticky top-0 hidden h-screen w-72 shrink-0 overflow-y-auto border-r border-white/70 bg-[#fffdf8]/78 px-4 py-5 text-slate-900 shadow-2xl shadow-slate-900/5 backdrop-blur-2xl lg:block">
