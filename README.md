@@ -1,23 +1,74 @@
-My readme   <<<<<<< HEAD
-# React + Vite
+# SpectraMind
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+SpectraMind is organized as a two-application repository:
 
-Currently, two official plugins are available:
+```text
+spectramind/   React and Vite frontend
+backend/       Node.js, Fastify, Prisma, and PostgreSQL backend
+```
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+The frontend source of truth is `spectramind/src`. There is intentionally no
+second frontend under the repository root.
 
-## React Compiler
+## Run locally
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Start PostgreSQL, then run the backend in one terminal:
 
-## Expanding the ESLint configuration
+```bash
+cd backend
+npm install
+npm run db:generate
+npx prisma migrate deploy
+npm run db:seed
+npm run dev
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
-=======
-# spectramindai
+Run the frontend in a second terminal:
 
-Test file to check if we can push or not.
->>>>>>> 8124c9998b7c19badd59b202fc6854e36a797310
+```bash
+cd spectramind
+npm install
+npm run dev
+```
 
+To connect the frontend to the API, set this in `spectramind/.env`:
+
+```env
+VITE_API_URL=http://127.0.0.1:4000
+```
+
+Local URLs:
+
+- Frontend: `http://localhost:5173`
+- Backend: `http://127.0.0.1:4000`
+- API documentation: `http://127.0.0.1:4000/api/docs`
+
+## Build and test
+
+```bash
+cd backend
+npm test
+npm run build
+
+cd ../spectramind
+npm run build
+```
+
+## Backend container
+
+The backend image must be built from the repository root so it can include the
+framework library owned by the frontend project:
+
+```bash
+docker build -f backend/Dockerfile -t spectramind-backend .
+```
+
+The image packages `spectramind/src/core/framework-library` at
+`/app/framework-library`. Set this in the deployed container:
+
+```env
+FRAMEWORK_LIBRARY_PATH=/app/framework-library
+```
+
+See `backend/README.md` for the complete API, database, security, testing, and
+cloud-deployment documentation.
