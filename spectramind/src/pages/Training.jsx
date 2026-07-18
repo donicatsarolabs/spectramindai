@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, Info, Plus, Trash2 } from "lucide-react";
-import { useLocation } from "react-router-dom";
+import { ChevronDown, ChevronUp, Plus, Trash2 } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useUser } from "../auth/UserContext";
 import { readScopedJson } from "../auth/session";
 import { isApiEnabled } from "../api/client";
 import { assignTraining, completeTraining, createTrainingCourse, deleteTrainingCourse, listEmployees, resetTrainingCompletion, synchronizeTraining, updateTrainingCourse } from "../api/people";
 import AppShell from "../components/layout/AppShell";
+import { useFrameworkWorkspace } from "../framework/FrameworkWorkspaceContext";
 import {
   canManageTraining,
-  getEmployeeTrainingCompliance,
   getTrainingMetrics,
   loadTrainingAssignments,
   loadTrainingCompletions,
@@ -20,17 +20,23 @@ import {
 
 export default function Training() {
   const location = useLocation();
+  const navigate = useNavigate();
   const targetItemId = new URLSearchParams(location.search).get("item");
   const { user } = useUser();
+  const { selectedFrameworks } = useFrameworkWorkspace();
   const canManage = canManageTraining(user);
+  const selectedFrameworkNames = useMemo(
+    () => selectedFrameworks.map(framework => framework.name),
+    [selectedFrameworks]
+  );
   const [employees, setEmployees] = useState(() => readScopedJson("spectramind:employees", []));
   const [library, setLibrary] = useState(() => loadTrainingLibrary());
   const [assignments, setAssignments] = useState(() => loadTrainingAssignments(readScopedJson("spectramind:employees", []), loadTrainingLibrary()));
   const [completions, setCompletions] = useState(() => loadTrainingCompletions());
-  const [expandedTrainingId, setExpandedTrainingId] = useState(null);
+  const expandedTrainingId = targetItemId;
   const [customName, setCustomName] = useState("");
   const [customDescription, setCustomDescription] = useState("");
-  const [customFramework, setCustomFramework] = useState("SOC 2");
+  const [customFramework, setCustomFramework] = useState(selectedFrameworks[0]?.name || "");
   const [assignmentIds, setAssignmentIds] = useState({});
   const [apiError, setApiError] = useState("");
   const [loading, setLoading] = useState(isApiEnabled);
@@ -60,33 +66,44 @@ export default function Training() {
       .then(([employeeRecords, courses]) => {
         if (cancelled) return;
         const mappedEmployees = employeeRecords.map((employee) => ({ ...employee, role: employee.jobRole || "User", type: employee.employmentType || "Full-Time" }));
-        const mappedLibrary = courses.map(fromApiCourse);
+        const localLibraryById = new Map(loadTrainingLibrary().map((course) => [course.id, course]));
+        const mappedLibrary = courses.map((course) => ({
+          ...fromApiCourse(course),
+          documentContent: localLibraryById.get(course.id)?.documentContent || "",
+          learningObjectives: localLibraryById.get(course.id)?.learningObjectives || [],
+        }));
         const nextAssignments = Object.fromEntries(courses.map((course) => [course.id, course.assignments.map((assignment) => assignment.employeeId)]));
         const nextCompletions = Object.fromEntries(courses.map((course) => [course.id, Object.fromEntries(course.assignments.filter((assignment) => assignment.status === "COMPLETED").map((assignment) => [assignment.employeeId, { completedAt: assignment.completedAt }]))]));
         const nextIds = Object.fromEntries(courses.flatMap((course) => course.assignments.map((assignment) => [`${course.id}:${assignment.employeeId}`, assignment.id])));
-        setEmployees(mappedEmployees); setLibrary(mappedLibrary); setAssignments(nextAssignments); setCompletions(nextCompletions); setAssignmentIds(nextIds);
+        setEmployees(mappedEmployees); setLibrary(mappedLibrary); setAssignments(nextAssignments); setCompletions(nextCompletions); setAssignmentIds(nextIds); saveTrainingLibrary(mappedLibrary);
       })
       .catch((error) => { if (!cancelled) setApiError(error.message || "Could not load training"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => {
-    if (targetItemId && library.some((training) => training.id === targetItemId)) {
-      setExpandedTrainingId(targetItemId);
-    }
-  }, [library, targetItemId]);
+  const applicableLibrary = useMemo(
+    () => library
+      .map(training => ({
+        ...training,
+        relatedFrameworks: training.relatedFrameworks.filter(framework =>
+          selectedFrameworkNames.some(selected => sameFramework(selected, framework))
+        ),
+      }))
+      .filter(training => training.relatedFrameworks.length > 0),
+    [library, selectedFrameworkNames]
+  );
 
   const visibleLibrary = useMemo(() => {
-    if (canManage) return library;
+    if (canManage) return applicableLibrary;
     const employee = findCurrentEmployee(employees, user);
     if (!employee) return [];
-    return library.filter((training) => (assignments[training.id] || []).includes(employee.id));
-  }, [assignments, canManage, employees, library, user]);
+    return applicableLibrary.filter((training) => (assignments[training.id] || []).includes(employee.id));
+  }, [applicableLibrary, assignments, canManage, employees, user]);
 
   const metricsByTraining = useMemo(
-    () => Object.fromEntries(library.map((training) => [training.id, getTrainingMetrics(training, employees, assignments, completions)])),
-    [assignments, completions, employees, library]
+    () => Object.fromEntries(applicableLibrary.map((training) => [training.id, getTrainingMetrics(training, employees, assignments, completions)])),
+    [applicableLibrary, assignments, completions, employees]
   );
 
   const totalTrainings = visibleLibrary.length;
@@ -95,8 +112,9 @@ export default function Training() {
   const totalCompletedCompletions = visibleLibrary.reduce((sum, training) => sum + (metricsByTraining[training.id]?.completed || 0), 0);
   const coveragePercent = totalRequiredCompletions ? Math.round((totalCompletedCompletions / totalRequiredCompletions) * 100) : 0;
 
-  const frameworkCards = ["SOC 2", "ISO 27001", "HIPAA"].map((framework) => {
-    const trainings = visibleLibrary.filter((training) => training.relatedFrameworks.includes(framework));
+  const frameworkCards = selectedFrameworks.map((frameworkRecord) => {
+    const framework = frameworkRecord.name;
+    const trainings = visibleLibrary.filter((training) => training.relatedFrameworks.some(item => sameFramework(item, framework)));
     const completed = trainings.filter((training) => metricsByTraining[training.id]?.status === "Completed").length;
     const assigned = trainings.reduce((sum, training) => sum + (metricsByTraining[training.id]?.totalAssigned || 0), 0);
     const done = trainings.reduce((sum, training) => sum + (metricsByTraining[training.id]?.completed || 0), 0);
@@ -136,7 +154,8 @@ export default function Training() {
   const toggleAssignment = async (trainingId, employeeId) => {
     if (!canManage) return;
     const current = assignments[trainingId] || [];
-    const nextTrainingAssignments = current.includes(employeeId)
+    const wasAssigned = current.includes(employeeId);
+    const nextTrainingAssignments = wasAssigned
       ? current.filter((id) => id !== employeeId)
       : [...current, employeeId];
     if (isApiEnabled) {
@@ -147,7 +166,21 @@ export default function Training() {
         setAssignmentIds((ids) => ({ ...ids, ...Object.fromEntries((course?.assignments || []).map((assignment) => [`${trainingId}:${assignment.employeeId}`, assignment.id])) }));
       } catch (error) { setApiError(error.message || "Could not update assignment"); return; }
     }
-    persistAssignments({ ...assignments, [trainingId]: nextTrainingAssignments });
+    const nextAssignments = { ...assignments, [trainingId]: nextTrainingAssignments };
+    if (wasAssigned) {
+      const nextTrainingCompletions = Object.fromEntries(
+        Object.entries(completions[trainingId] || {}).filter(([id]) => String(id) !== String(employeeId))
+      );
+      const nextCompletions = { ...completions, [trainingId]: nextTrainingCompletions };
+      setAssignments(nextAssignments);
+      setCompletions(nextCompletions);
+      if (!isApiEnabled) {
+        saveTrainingAssignments(nextAssignments);
+        saveTrainingCompletions(nextCompletions, employees, library, nextAssignments);
+      }
+      return;
+    }
+    persistAssignments(nextAssignments);
   };
 
   const updateDueDate = async (trainingId, dueDate) => {
@@ -173,8 +206,9 @@ export default function Training() {
   };
 
   const addCustomTraining = async () => {
-    if (!canManage || !customName.trim()) return;
-    const apiCourse = isApiEnabled ? await createTrainingCourse({ name: customName.trim(), description: customDescription.trim() || "Custom training requirement.", relatedFrameworks: [customFramework] }).catch((error) => { setApiError(error.message); return null; }) : null;
+    const selectedCustomFramework = selectedFrameworkNames.includes(customFramework) ? customFramework : selectedFrameworkNames[0];
+    if (!canManage || !customName.trim() || !selectedCustomFramework) return;
+    const apiCourse = isApiEnabled ? await createTrainingCourse({ name: customName.trim(), description: customDescription.trim() || "Custom training requirement.", relatedFrameworks: [selectedCustomFramework] }).catch((error) => { setApiError(error.message); return null; }) : null;
     if (isApiEnabled && !apiCourse) return;
     const id = apiCourse?.id || `custom-${Date.now()}`;
     const nextLibrary = [
@@ -183,7 +217,7 @@ export default function Training() {
         id,
         name: customName.trim(),
         description: customDescription.trim() || "Custom training requirement.",
-        relatedFrameworks: [customFramework],
+        relatedFrameworks: [selectedCustomFramework],
         dueDate: "",
         custom: true,
       },
@@ -225,7 +259,7 @@ export default function Training() {
         <div className="space-y-2">
           <h1 className="text-4xl font-black text-slate-900">Training</h1>
           <p className="max-w-4xl text-sm leading-6 text-slate-500">
-            Trainings help your team stay aligned with security and privacy standards. On this page, you can view and manage the list of training requirements linked to your active compliance frameworks. Each training includes clear step-by-step instructions and links to the necessary learning materials. You can assign trainings to employees and track their completion to ensure your organization stays audit ready.
+            Assign and track training for your organization’s selected compliance frameworks.
           </p>
         </div>
 
@@ -233,9 +267,7 @@ export default function Training() {
           <div className="flex flex-col gap-6 border-b border-slate-100 pb-4 dark:border-slate-800 md:flex-row md:items-center md:justify-between">
             <div className="flex-1">
               <h2 className="text-lg font-black text-slate-900">Training Overview</h2>
-              <p className="mt-1 text-xs font-semibold text-slate-400">
-                Track compliance training coverage across all active frameworks.
-              </p>
+              <p className="mt-1 text-xs font-semibold text-slate-400">{selectedFrameworks.length} selected {selectedFrameworks.length === 1 ? "framework" : "frameworks"}</p>
             </div>
             <div className="rounded-lg bg-amber-50 px-3 py-1.5 text-right dark:bg-amber-950/30">
               <p className="text-[10px] font-black uppercase tracking-wider text-amber-700">COMPLIANCE SCORE</p>
@@ -261,13 +293,10 @@ export default function Training() {
 
         <div className="space-y-3">
           <h2 className="flex items-center gap-2 text-lg font-black text-slate-900">
-            Frameworks
-            <button className="text-slate-400 hover:text-slate-600">
-              <Info size={16} />
-            </button>
+            Selected frameworks
           </h2>
 
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {frameworkCards.map((card) => (
               <div key={card.framework} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
                 <div className="flex items-start justify-between">
@@ -304,10 +333,8 @@ export default function Training() {
             <div className="mt-3 grid gap-2 md:grid-cols-[1fr_1fr_160px_auto]">
               <input value={customName} onChange={(event) => setCustomName(event.target.value)} placeholder="Training name" className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold outline-none" />
               <input value={customDescription} onChange={(event) => setCustomDescription(event.target.value)} placeholder="Description" className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold outline-none" />
-              <select value={customFramework} onChange={(event) => setCustomFramework(event.target.value)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold outline-none">
-                <option>SOC 2</option>
-                <option>ISO 27001</option>
-                <option>HIPAA</option>
+              <select value={selectedFrameworkNames.includes(customFramework) ? customFramework : selectedFrameworkNames[0] || ""} onChange={(event) => setCustomFramework(event.target.value)} disabled={!selectedFrameworkNames.length} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold outline-none disabled:bg-slate-100">
+                {selectedFrameworkNames.map(framework => <option key={framework}>{framework}</option>)}
               </select>
               <button type="button" onClick={addCustomTraining} className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-black text-white">
                 <Plus size={16} />
@@ -328,7 +355,7 @@ export default function Training() {
               return (
                 <div key={training.id} className="border-b border-slate-100 last:border-0 dark:border-slate-800">
                   <div
-                    onClick={() => setExpandedTrainingId(isExpanded ? null : training.id)}
+                    onClick={() => navigate(`/training/${encodeURIComponent(training.id)}`, { state: { returnTo: `${location.pathname}${location.search}` } })}
                     className="flex cursor-pointer items-center justify-between p-5 transition hover:bg-slate-50/50"
                   >
                     <div className="space-y-1">
@@ -423,6 +450,8 @@ export default function Training() {
                                     type="checkbox"
                                     checked={isAssigned}
                                     onChange={() => toggleAssignment(training.id, employee.id)}
+                                    aria-label={`Assign ${training.name} to ${employee.name}`}
+                                    title="Training assigned"
                                     className="h-4 w-4 rounded border-slate-350 text-blue-600 focus:ring-blue-500"
                                   />
                                 ) : null}
@@ -431,6 +460,8 @@ export default function Training() {
                                   checked={isCompleted}
                                   disabled={!isAssigned || !canCompleteFor(employee)}
                                   onChange={() => toggleCompletion(training.id, employee.id)}
+                                  aria-label={`Mark ${training.name} complete for ${employee.name}`}
+                                  title={isAssigned ? "Training completed" : "Assign this training first"}
                                   className="h-4 w-4 rounded border-slate-350 text-emerald-600 focus:ring-emerald-500 disabled:opacity-40"
                                 />
                                 <span className="min-w-0 truncate">{employee.name}</span>
@@ -447,7 +478,7 @@ export default function Training() {
 
             {!visibleLibrary.length && (
               <div className="p-8 text-center text-sm font-bold text-slate-500">
-                No assigned trainings found.
+                No training requirements are available for the selected frameworks.
               </div>
             )}
           </div>
@@ -487,6 +518,17 @@ function frameworkBadge(framework) {
   if (framework === "HIPAA") return "bg-purple-50 text-purple-700";
   if (framework === "ISO 27001") return "bg-emerald-50 text-emerald-700";
   return "bg-blue-50 text-blue-700";
+}
+
+function sameFramework(left, right) {
+  return normalizeFrameworkName(left) === normalizeFrameworkName(right);
+}
+
+function normalizeFrameworkName(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/type\s*ii/g, "")
+    .replace(/[^a-z0-9]/g, "");
 }
 
 function findCurrentEmployee(employees, user) {

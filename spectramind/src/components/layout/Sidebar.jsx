@@ -17,6 +17,7 @@ import {
 import { Link, useLocation } from "react-router-dom";
 import { APP_NAME, useOrganizationLogo } from "../../core/adapters/useOrganizationBranding";
 import { useFrameworkWorkspace } from "../../framework/FrameworkWorkspaceContext";
+import { useUser } from "../../auth/UserContext";
 
 const dashboardItem = { name: "Dashboard", path: "/dashboard", icon: LayoutDashboard };
 
@@ -44,6 +45,7 @@ export default function Sidebar() {
   const location = useLocation();
   const organizationLogo = useOrganizationLogo();
   const { activeFramework } = useFrameworkWorkspace();
+  const { user } = useUser();
   const complianceItems = activeFramework
     ? [frameworkItem, ...frameworkScopedComplianceItems]
     : [frameworkItem];
@@ -67,7 +69,7 @@ export default function Sidebar() {
         </span>
         <div>
           <p className="text-xl font-black leading-tight text-slate-950">
-            {APP_NAME}
+            {user?.organizationName || APP_NAME}
           </p>
           <p className="text-[10px] font-bold text-slate-400">
             Compliance workspace

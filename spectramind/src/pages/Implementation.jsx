@@ -26,13 +26,14 @@ import { useComplianceState } from "../compliance/ComplianceStateContext";
 import { DEFAULT_FRAMEWORK_ID, ISO27001_FRAMEWORK_ID, resolveFrameworkId } from "../core/engines/framework-engine/frameworkRegistry";
 import { frameworks } from "../data/mockData";
 import EvidenceManagementSection from "../evidence/EvidenceManagementSection";
-import { buildCrossModuleTarget, implementationTabForItemType } from "../navigation/crossModuleNavigation";
+import { buildCrossModuleTarget, implementationTabForItemType, normalizeItemType } from "../navigation/crossModuleNavigation";
 import {
   getQuestionnaireApplicability,
   isRelevantToQuestionnaire,
   loadQuestionnaireResponses,
 } from "../data/questionnaireEngine";
 import { frameworkHasLibrary, useFrameworkWorkspace } from "../framework/FrameworkWorkspaceContext";
+import { loadPolicyLibrary } from "../policies/PolicyService";
 
 const implementationTabs = [
   "Risk Scenarios",
@@ -121,7 +122,8 @@ export default function Implementation() {
   const location = useLocation();
   const navigate = useNavigate();
   const frameworkWorkspace = useFrameworkWorkspace();
-  const [activeTab, setActiveTab] = useState("Tests");
+  const requestedItemType = new URLSearchParams(location.search).get("itemType");
+  const [activeTab, setActiveTab] = useState(() => implementationTabForItemType(requestedItemType, "Tests"));
   const selectedFramework = getSelectedFramework(location, frameworkWorkspace.frameworks);
   const selectedFrameworkId = resolveFrameworkId(selectedFramework?.slug) || DEFAULT_FRAMEWORK_ID;
 
@@ -270,10 +272,18 @@ export default function Implementation() {
   };
 
   useEffect(() => {
-    const frameId = requestAnimationFrame(() => setActiveTab(defaultActiveTab));
+    const requestedTab = implementationTabForItemType(requestedItemType, defaultActiveTab);
+    const frameId = requestAnimationFrame(() => setActiveTab(requestedTab));
 
     return () => cancelAnimationFrame(frameId);
-  }, [defaultActiveTab, selectedFramework?.slug]);
+  }, [defaultActiveTab, requestedItemType, selectedFramework?.slug]);
+
+  useEffect(() => {
+    const item = getWorkspaceItemFromLocation({ search: location.search }, implementationData);
+    if (!item) return undefined;
+    const frameId = requestAnimationFrame(() => setWorkspaceItem(item));
+    return () => cancelAnimationFrame(frameId);
+  }, [implementationData, location.search]);
 
   useEffect(() => {
     const syncWorkspaceFromUrl = () => {
@@ -1404,6 +1414,12 @@ function PoliciesSection({ rows, questionnaireResponses, workspaceData, selected
                 onClick={() => {
                   if (!isDisabled) onSelectWorkspaceItem(createWorkspaceItem("Policy", policy));
                 }}
+                onKeyDown={(event) => {
+                  if (!isDisabled && (event.key === "Enter" || event.key === " ")) {
+                    event.preventDefault();
+                    onSelectWorkspaceItem(createWorkspaceItem("Policy", policy));
+                  }
+                }}
                 role={isDisabled ? undefined : "button"}
                 tabIndex={isDisabled ? -1 : 0}
                 aria-disabled={isDisabled}
@@ -1666,6 +1682,7 @@ class WorkspaceErrorBoundary extends Component {
 
 function ImplementationWorkspace({ item, framework, data, savedState = {}, workspaceData = {}, onWorkspaceStateChange, onClose, relationshipGraph, onNavigateRelatedItem }) {
   const { user } = useUser();
+  const location = useLocation();
   const state = savedState || {};
   const graphLinkedItems = useMemo(
     () => getLinkedItemsFromGraph(item, data, relationshipGraph),
@@ -1717,6 +1734,11 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, works
       }),
     [audit, centralPolicies, centralQuestionnaireResponses, centralTasks, data, evidenceRecords, item, linkedItems, state]
   );
+  const mappedPolicyDocument = useMemo(() => {
+    if (item.type !== "Policy" || !framework?.id) return null;
+    return loadPolicyLibrary(framework.id, centralPolicies, framework)
+      .find((policy) => policy.id === item.id)?.document || null;
+  }, [centralPolicies, framework, item.id, item.type]);
   const hasCurrentItemEvidence = hasEvidenceForItem(item, state);
   const linkedTests = normalizeRelationshipList(linkedItems.tests);
   const linkedControls = normalizeRelationshipList(linkedItems.controls);
@@ -2887,6 +2909,22 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, works
               Mark Ready
             </button>
           </div>
+          {mappedPolicyDocument ? (
+            <Link
+              to={`/policies/${encodeURIComponent(item.id)}/document`}
+              state={{ returnTo: `${location.pathname}${location.search}` }}
+              className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-blue-100 bg-blue-50/50 p-3 transition hover:border-blue-300 hover:bg-blue-50"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <FileText size={17} className="shrink-0 text-blue-600" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-black text-slate-900" title={mappedPolicyDocument.name}>{safeDisplayText(mappedPolicyDocument.name, `${item.title}.html`)}</p>
+                  <p className="text-xs font-semibold text-slate-400">Mapped policy document</p>
+                </div>
+              </div>
+              <ArrowRight size={16} className="shrink-0 text-blue-500" />
+            </Link>
+          ) : null}
           {evidenceFiles.length ? (
             <div className="space-y-2">
               {evidenceFiles.map((file) => (
@@ -2899,11 +2937,11 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, works
                 </div>
               ))}
             </div>
-          ) : (
+          ) : !mappedPolicyDocument ? (
             <p className="rounded-lg border border-dashed border-slate-200 px-4 py-5 text-center text-xs font-semibold text-slate-400">
               No documents uploaded yet.
             </p>
-          )}
+          ) : null}
         </div>
 
         <div className="space-y-3 border-b border-slate-100 pb-5">
@@ -3618,8 +3656,8 @@ function updateWorkspaceHistory(item, replace = false) {
 
 function getWorkspaceItemFromLocation(locationValue, data) {
   const searchParams = new URLSearchParams(locationValue.search);
-  const itemType = searchParams.get("itemType");
-  const itemId = searchParams.get("itemId");
+  const itemType = normalizeItemType(searchParams.get("itemType"));
+  const itemId = searchParams.get("itemId") || searchParams.get("item");
 
   if (!itemType || !itemId) return null;
 
@@ -3630,7 +3668,7 @@ function getWorkspaceItemFromLocation(locationValue, data) {
     Policy: data.policies,
     Population: data.populations,
   };
-  const row = rowsByType[itemType]?.find((item) => item.id === itemId);
+  const row = rowsByType[itemType]?.find((item) => String(item.id) === String(itemId));
 
   return row ? createWorkspaceItem(itemType, row) : null;
 }

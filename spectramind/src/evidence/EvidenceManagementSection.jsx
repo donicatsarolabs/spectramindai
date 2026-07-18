@@ -18,6 +18,7 @@ import {
 } from "./EvidenceService";
 import { isApiEnabled } from "../api/client";
 import { addEvidenceCommentApi, deleteEvidenceApi, listEvidence, replaceEvidenceFileApi, restoreEvidenceVersionApi, reviewEvidenceApi, toLegacyEvidence, uploadEvidenceFile } from "../api/evidence";
+import { canManageWorkspace } from "../auth/session";
 
 const healthStyles = {
   Valid: "bg-emerald-50 text-emerald-700",
@@ -40,6 +41,7 @@ export default function EvidenceManagementSection({
   onEvidenceChange,
 }) {
   const { user } = useUser();
+  const canDeleteEvidence = canManageWorkspace(user?.role);
   const inputRef = useRef(null);
   const replaceInputRef = useRef(null);
   const [description, setDescription] = useState("");
@@ -317,14 +319,14 @@ export default function EvidenceManagementSection({
                   <RefreshCw size={13} />
                   Replace
                 </button>
-                <button
+                {canDeleteEvidence && <button
                   type="button"
                   onClick={() => isApiEnabled && record.apiRecord ? deleteApiRecord(record) : updateRecords((current) => deleteEvidenceRecord(current, record.id, user, "Deleted from test details"))}
                   className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-black text-rose-600 hover:bg-rose-50"
                 >
                   <Trash2 size={13} />
                   Delete
-                </button>
+                </button>}
               </div>
 
               <div className="mt-3 grid gap-2">

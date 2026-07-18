@@ -3,6 +3,9 @@ import Dashboard from "./pages/Dashboard";
 
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
+import Signup from "./pages/Signup";
+import OrganizationSetup from "./pages/OrganizationSetup";
+import JoinOrganization from "./pages/JoinOrganization";
 
 import Frameworks from "./pages/Frameworks";
 import Evidence from "./pages/Evidence";
@@ -11,6 +14,7 @@ import Questionnaire from "./pages/Questionnaire";
 import Implementation from "./pages/Implementation";
 import MandatoryDocumentUpload from "./pages/MandatoryDocumentUpload";
 import Training from "./pages/Training";
+import TrainingDetails from "./pages/TrainingDetails";
 import Employees from "./pages/Employees";
 import Integrations from "./pages/Integrations";
 import Audits from "./pages/Audits";
@@ -23,6 +27,7 @@ import SOC2 from "./pages/SOC2";
 
 import ControlDetails from "./pages/ControlDetails";
 import Policies from "./pages/Policies";
+import PolicyDocument from "./pages/PolicyDocument";
 
 import Assistant from "./pages/Assistant";
 
@@ -41,6 +46,7 @@ import ISO27001Solution from "./pages/ISO27001Solution";
 import CMMCSolution from "./pages/CMMCSolution";
 import { cmmcWorkspaceRoutes } from "./features/cmmc/routes";
 import ProtectedRoute from "./auth/ProtectedRoute";
+import { OnboardingRequired } from "./auth/WorkspaceAccess";
 import ActiveFrameworkOutlet from "./framework/ActiveFrameworkOutlet";
 
 function App() {
@@ -89,8 +95,12 @@ function App() {
         path="/login"
         element={<Login />}
       />
+      <Route path="/signup" element={<Signup />} />
 
       <Route element={<ProtectedRoute />}>
+        <Route path="/onboarding/organization" element={<OrganizationSetup />} />
+        <Route path="/join-organization" element={<JoinOrganization />} />
+        <Route element={<OnboardingRequired />}>
         <Route path="/profile" element={<Profile />} />
         <Route path="/profile-settings" element={<ProfileSettings />} />
         <Route path="/frameworks" element={<Frameworks />} />
@@ -102,12 +112,14 @@ function App() {
           <Route path="/implementation" element={<Implementation />} />
           <Route path="/implementation/mandatory-documents/:documentId/upload" element={<MandatoryDocumentUpload />} />
           <Route path="/training" element={<Training />} />
+          <Route path="/training/:trainingId" element={<TrainingDetails />} />
           <Route path="/employees" element={<Employees />} />
           <Route path="/integrations" element={<Integrations />} />
           <Route path="/audits" element={<Audits />} />
           <Route path="/comments" element={<Comments />} />
           <Route path="/tasks" element={<Tasks />} />
           <Route path="/policies" element={<Policies />} />
+          <Route path="/policies/:policyId/document" element={<PolicyDocument />} />
           <Route path="/assistant" element={<Assistant />} />
         </Route>
         <Route path="/trust-center" element={<TrustCenter />} />
@@ -121,6 +133,7 @@ function App() {
           ))}
         </Route>
         <Route path="/dashboard" element={<Dashboard />} />
+        </Route>
       </Route>
 
     </Routes>

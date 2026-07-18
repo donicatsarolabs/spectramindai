@@ -5,10 +5,15 @@ export const POLICY_ASSIGNMENTS_KEY = "spectramind:policy-assignments";
 export const POLICY_ACKNOWLEDGEMENTS_KEY = "spectramind:policy-acknowledgements";
 export const POLICY_STATUS_KEY = "spectramind:employee-policy-status";
 
-export const POLICY_MANAGER_ROLES = new Set(["Admin", "Compliance Manager", "Security Manager", "HR"]);
+export const POLICY_MANAGER_ROLES = new Set(["Admin", "Manager", "Compliance Manager", "Security Manager", "HR"]);
+export const POLICY_PUBLISHER_ROLES = new Set(["Manager", "Compliance Manager", "Security Manager"]);
 
 export function canManagePolicies(user) {
   return POLICY_MANAGER_ROLES.has(user?.role || "");
+}
+
+export function canPublishPolicies(user) {
+  return POLICY_PUBLISHER_ROLES.has(user?.role || "");
 }
 
 export function loadPolicyLibrary(frameworkId, frameworkPolicies = [], activeFramework = null) {
@@ -27,16 +32,51 @@ export function loadPolicyLibrary(frameworkId, frameworkPolicies = [], activeFra
       effectiveDate: savedPolicy?.effectiveDate || "",
       reviewDate: savedPolicy?.reviewDate || "",
       customFieldValues: savedPolicy?.customFieldValues || {},
-      document: savedPolicy?.document || null,
-      status: savedPolicy?.status || normalizePolicyStatus(policy.status),
+      document: savedPolicy?.documentDeleted
+        ? null
+        : savedPolicy?.document || buildDefaultPolicyDocument(policy, frameworkName),
+      documentDeleted: savedPolicy?.documentDeleted || false,
+      status: normalizePolicyStatus(policy.status) === "Active"
+        ? "Active"
+        : savedPolicy?.status || normalizePolicyStatus(policy.status),
       requireReacknowledgement: savedPolicy?.requireReacknowledgement ?? true,
       versionHistory: savedPolicy?.versionHistory || [],
       custom: false,
       sourcePolicy: policy,
     };
   });
-  const custom = saved.filter((policy) => policy.custom);
+  const custom = saved.filter((policy) => policy.custom).map((policy) => ({
+    ...policy,
+    document: policy.documentDeleted
+      ? null
+      : policy.document || buildDefaultPolicyDocument(policy, frameworkName),
+  }));
   return [...base, ...custom];
+}
+
+export function buildDefaultPolicyDocument(policy = {}, frameworkName = "Framework") {
+  const title = policy.title || policy.name || "Policy";
+  const description = policy.description || policy.aiSummary || `This document describes the organization's ${title.toLowerCase()}.`;
+  const controls = policy.linkedControls || policy.relatedControls || [];
+  const tests = policy.linkedTests || policy.relatedTests || [];
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:Arial,sans-serif;max-width:850px;margin:48px auto;padding:0 32px;color:#172033;line-height:1.65}header{border-bottom:3px solid #a8732f;padding-bottom:22px;margin-bottom:30px}h1{font-size:32px;margin:0 0 8px}h2{margin-top:30px;font-size:19px}p,li{font-size:15px}.meta{color:#667085;font-weight:600}.box{background:#f8f5ef;border:1px solid #e5dccd;border-radius:10px;padding:18px}.footer{margin-top:45px;padding-top:18px;border-top:1px solid #ddd;color:#777;font-size:12px}</style></head><body><header><p class="meta">${escapeHtml(frameworkName)} · Policy Document</p><h1>${escapeHtml(title)}</h1><p>Version 1.0 · Draft</p></header><h2>Purpose</h2><p>${escapeHtml(description)}</p><h2>Scope</h2><p>This policy applies to the organization, its workforce, systems, information assets, and relevant third parties within the ${escapeHtml(frameworkName)} compliance scope.</p><h2>Policy Requirements</h2><div class="box"><p>The organization will maintain appropriate governance, ownership, operating procedures, evidence, periodic reviews, and corrective actions for this policy.</p></div><h2>Responsibilities</h2><ul><li>Management approves and periodically reviews this policy.</li><li>Policy owners maintain procedures and supporting evidence.</li><li>Employees follow the approved requirements and complete assigned acknowledgements.</li></ul>${controls.length ? `<h2>Mapped Controls</h2><p>${controls.map(escapeHtml).join(", ")}</p>` : ""}${tests.length ? `<h2>Connected Tests</h2><p>${tests.map(escapeHtml).join(", ")}</p>` : ""}<h2>Review and Approval</h2><p>This document remains in draft until a policy manager publishes it. Publication makes it available to administrators and users.</p><p class="footer">Generated from the authoritative ${escapeHtml(frameworkName)} policy library.</p></body></html>`;
+
+  return {
+    name: `${slugify(title)}.html`,
+    type: "text/html",
+    size: new Blob([html]).size,
+    uploadedAt: new Date().toISOString(),
+    generated: true,
+    dataUrl: `data:text/html;charset=utf-8,${encodeURIComponent(html)}`,
+  };
+}
+
+function slugify(value) {
+  return String(value || "policy").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "policy";
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[character]));
 }
 
 export function savePolicyLibrary(frameworkId, library) {
@@ -81,6 +121,9 @@ export function updatePolicy(library, policyId, updates) {
     return {
       ...policy,
       ...updates,
+      ...(Object.prototype.hasOwnProperty.call(updates, "document")
+        ? { documentDeleted: updates.document === null }
+        : {}),
       versionHistory: shouldVersion
         ? [
             {
@@ -215,12 +258,13 @@ function storageKey(baseKey, frameworkId) {
 }
 
 function stripSourcePolicy(policy) {
-  const { sourcePolicy, ...serializable } = policy;
+  const serializable = { ...policy };
+  delete serializable.sourcePolicy;
   return serializable;
 }
 
 function normalizePolicyStatus(status) {
   if (["Active", "Draft", "Archived"].includes(status)) return status;
-  if (["Approved", "Completed", "complete", "implemented"].includes(status)) return "Active";
+  if (["Approved", "Published", "Completed", "complete", "implemented"].includes(status)) return "Active";
   return "Draft";
 }

@@ -1,9 +1,10 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma.js";
 import { requireTenant } from "../../plugins/auth.js";
 
 const activateSchema = z.object({ frameworkId: z.string().min(1) });
+const checkoutSchema = z.object({ frameworkIds: z.array(z.string().min(1)).min(1).max(20).transform(values => [...new Set(values)]) });
 const updateSchema = z.object({
   status: z.enum(["NOT_STARTED", "IN_PROGRESS", "IMPLEMENTED", "NOT_APPLICABLE"]),
   notes: z.string().max(5000).nullable().optional(),
@@ -26,6 +27,7 @@ export async function frameworkRoutes(app: FastifyInstance) {
   });
 
   app.post("/organization-frameworks", async (request, reply) => {
+    requireWorkspaceManager(request);
     const { frameworkId } = activateSchema.parse(request.body);
     const framework = await prisma.framework.findUnique({ where: { id: frameworkId } });
     if (!framework) return reply.code(404).send({ code: "FRAMEWORK_NOT_FOUND", message: "Framework not found" });
@@ -43,6 +45,30 @@ export async function frameworkRoutes(app: FastifyInstance) {
       return activated;
     });
     return reply.code(201).send(record);
+  });
+
+  app.post("/organization-frameworks/checkout", async (request, reply) => {
+    requireWorkspaceManager(request);
+    const { frameworkIds } = checkoutSchema.parse(request.body);
+    const frameworkCount = await prisma.framework.count({ where: { id: { in: frameworkIds } } });
+    if (frameworkCount !== frameworkIds.length) return reply.code(404).send({ code: "FRAMEWORK_NOT_FOUND", message: "One or more frameworks were not found" });
+
+    const records = await prisma.$transaction(async tx => {
+      const activated = [];
+      for (const frameworkId of frameworkIds) {
+        activated.push(await tx.organizationFramework.upsert({
+          where: { organizationId_frameworkId: { organizationId: request.tenant.organizationId, frameworkId } },
+          create: { organizationId: request.tenant.organizationId, frameworkId },
+          update: { active: true },
+          include: { framework: true },
+        }));
+        await tx.activityEvent.create({
+          data: { organizationId: request.tenant.organizationId, actorUserId: request.tenant.userId, action: "framework.checkout.activated", entityType: "framework", entityId: frameworkId },
+        });
+      }
+      return activated;
+    });
+    return reply.code(201).send(records);
   });
 
   app.get("/controls", async (request) => {
@@ -82,13 +108,30 @@ export async function frameworkRoutes(app: FastifyInstance) {
 
   app.get("/dashboard", async (request) => {
     const query = z.object({ frameworkId: z.string().optional() }).parse(request.query);
-    const activated = await prisma.organizationFramework.findMany({ where: { organizationId: request.tenant.organizationId, active: true, frameworkId: query.frameworkId }, select: { frameworkId: true } });
+    const activated = await prisma.organizationFramework.findMany({ where: { organizationId: request.tenant.organizationId, active: true, frameworkId: query.frameworkId }, include: { framework: { select: { name: true, slug: true } } }, orderBy: { createdAt: "asc" } });
     const frameworkIds = activated.map((item) => item.frameworkId);
-    const [totalControls, implementations, recentActivity, evidenceTotal, policiesTotal, policiesPublished, openRisks, highRisks, openTasks, auditFindings, employeesTotal, trainingAssigned, trainingCompleted] = await Promise.all([
+    const [totalControls, implementations, recentActivity, evidenceTotal, approvedEvidenceControls, policiesTotal, policiesPublished, openRisks, highRisks, openTasks, auditFindings, employeesTotal, trainingAssigned, trainingCompleted] = await Promise.all([
       prisma.control.count({ where: { frameworkId: { in: frameworkIds } } }),
       prisma.controlImplementation.groupBy({ by: ["status"], where: { organizationId: request.tenant.organizationId, control: { frameworkId: { in: frameworkIds } } }, _count: true }),
-      prisma.activityEvent.findMany({ where: { organizationId: request.tenant.organizationId }, orderBy: { createdAt: "desc" }, take: 20 }),
+      prisma.activityEvent.findMany({
+        where: {
+          organizationId: request.tenant.organizationId,
+          OR: query.frameworkId
+            ? [
+                { entityId: query.frameworkId },
+                { metadata: { path: ["frameworkId"], equals: query.frameworkId } },
+              ]
+            : undefined,
+        },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      }),
       prisma.evidenceRecord.count({ where: { organizationId: request.tenant.organizationId, frameworkId: { in: frameworkIds } } }),
+      prisma.evidenceMapping.findMany({
+        where: { evidence: { organizationId: request.tenant.organizationId, frameworkId: { in: frameworkIds }, status: "APPROVED", deletedAt: null } },
+        distinct: ["controlId"],
+        select: { controlId: true },
+      }),
       prisma.policy.count({ where: { organizationId: request.tenant.organizationId, frameworkId: { in: frameworkIds } } }),
       prisma.policy.count({ where: { organizationId: request.tenant.organizationId, frameworkId: { in: frameworkIds }, status: "ACTIVE" } }),
       prisma.risk.count({ where: { organizationId: request.tenant.organizationId, frameworkId: { in: frameworkIds }, treatmentStatus: { in: ["OPEN", "IN_PROGRESS"] } } }),
@@ -100,6 +143,30 @@ export async function frameworkRoutes(app: FastifyInstance) {
       prisma.trainingAssignment.count({ where: { course: { organizationId: request.tenant.organizationId }, status: "COMPLETED" } }),
     ]);
     const implemented = implementations.find((row) => row.status === "IMPLEMENTED")?._count ?? 0;
-    return { totalControls, implementedControls: implemented, progressPercent: totalControls ? Math.round((implemented / totalControls) * 100) : 0, byStatus: implementations, recentActivity, evidenceTotal, policiesTotal, policiesPublished, openRisks, highRisks, openTasks, auditFindings, employeesTotal, trainingAssigned, trainingCompleted, trainingCompletionPercent: trainingAssigned ? Math.round(trainingCompleted / trainingAssigned * 100) : 0 };
+    const frameworkProgress = await Promise.all(activated.map(async item => {
+      const [controls, implementedControls, approvedControlEvidence, totalPolicies, publishedPolicies] = await Promise.all([
+        prisma.control.count({ where: { frameworkId: item.frameworkId } }),
+        prisma.controlImplementation.count({ where: { organizationId: request.tenant.organizationId, status: "IMPLEMENTED", control: { frameworkId: item.frameworkId } } }),
+        prisma.evidenceMapping.findMany({
+          where: { evidence: { organizationId: request.tenant.organizationId, frameworkId: item.frameworkId, status: "APPROVED", deletedAt: null } },
+          distinct: ["controlId"],
+          select: { controlId: true },
+        }),
+        prisma.policy.count({ where: { organizationId: request.tenant.organizationId, frameworkId: item.frameworkId } }),
+        prisma.policy.count({ where: { organizationId: request.tenant.organizationId, frameworkId: item.frameworkId, status: "ACTIVE" } }),
+      ]);
+      const scoreTotal = controls * 2 + totalPolicies;
+      const scoreCompleted = implementedControls + approvedControlEvidence.length + publishedPolicies;
+      return { id: item.frameworkId, name: item.framework.name, slug: item.framework.slug, totalControls: controls, implementedControls, approvedEvidenceControls: approvedControlEvidence.length, totalPolicies, publishedPolicies, progressPercent: scoreTotal ? Math.round(scoreCompleted / scoreTotal * 100) : 0 };
+    }));
+    const scoreTotal = totalControls * 2 + policiesTotal;
+    const scoreCompleted = implemented + approvedEvidenceControls.length + policiesPublished;
+    return { totalControls, implementedControls: implemented, approvedEvidenceControls: approvedEvidenceControls.length, progressPercent: scoreTotal ? Math.round(scoreCompleted / scoreTotal * 100) : 0, frameworkProgress, byStatus: implementations, recentActivity, evidenceTotal, policiesTotal, policiesPublished, openRisks, highRisks, openTasks, auditFindings, employeesTotal, trainingAssigned, trainingCompleted, trainingCompletionPercent: trainingAssigned ? Math.round(trainingCompleted / trainingAssigned * 100) : 0 };
   });
+}
+
+function requireWorkspaceManager(request: FastifyRequest) {
+  if (!["OWNER", "ADMIN", "COMPLIANCE_MANAGER", "SECURITY_MANAGER", "HR_MANAGER"].includes(request.tenant.role)) {
+    throw Object.assign(new Error("Only an Admin or Manager can select frameworks"), { statusCode: 403 });
+  }
 }

@@ -7,7 +7,8 @@ const registerSchema = z.object({
   name: z.string().trim().min(2).max(100),
   email: z.email().transform((value) => value.toLowerCase()),
   password: z.string().min(12).max(128),
-  organizationName: z.string().trim().min(2).max(120),
+  organizationName: z.string().trim().min(2).max(120).optional(),
+  role: z.enum(["Admin", "Manager", "User"]).default("Admin"),
 });
 
 const loginSchema = z.object({
@@ -21,15 +22,25 @@ export async function authRoutes(app: FastifyInstance) {
     const existing = await prisma.user.findUnique({ where: { email: input.email } });
     if (existing) return reply.code(409).send({ code: "EMAIL_EXISTS", message: "Email is already registered" });
 
+    if (input.role === "User" && input.organizationName) {
+      return reply.code(403).send({ code: "ROLE_CANNOT_CREATE_ORGANIZATION", message: "User accounts must join an organization through an invitation" });
+    }
     const passwordHash = await bcrypt.hash(input.password, 12);
-    const baseSlug = slugify(input.organizationName);
-    const organizationSlug = await uniqueOrganizationSlug(baseSlug);
+    const requestedRole = input.role === "User" ? "EMPLOYEE" : input.role === "Manager" ? "COMPLIANCE_MANAGER" : "ADMIN";
+
+    if (!input.organizationName) {
+      const user = await prisma.user.create({ data: { name: input.name, email: input.email, passwordHash, requestedRole } });
+      const token = app.jwt.sign({ sub: user.id, email: user.email });
+      return reply.code(201).send({ token, user: { id: user.id, name: user.name, email: user.email, requestedRole }, organizations: [] });
+    }
+    const organizationName = input.organizationName;
+    const organizationSlug = await uniqueOrganizationSlug(slugify(organizationName));
 
     const result = await prisma.$transaction(async (tx) => {
-      const user = await tx.user.create({ data: { name: input.name, email: input.email, passwordHash } });
-      const organization = await tx.organization.create({ data: { name: input.organizationName, slug: organizationSlug } });
+      const user = await tx.user.create({ data: { name: input.name, email: input.email, passwordHash, requestedRole } });
+      const organization = await tx.organization.create({ data: { name: organizationName, slug: organizationSlug } });
       const membership = await tx.organizationMembership.create({
-        data: { userId: user.id, organizationId: organization.id, role: "OWNER" },
+        data: { userId: user.id, organizationId: organization.id, role: input.role === "Manager" ? "COMPLIANCE_MANAGER" : "OWNER" },
       });
       await tx.activityEvent.create({
         data: { organizationId: organization.id, actorUserId: user.id, action: "organization.created", entityType: "organization", entityId: organization.id },
@@ -51,7 +62,7 @@ export async function authRoutes(app: FastifyInstance) {
       return reply.code(401).send({ code: "INVALID_CREDENTIALS", message: "Invalid email or password" });
     }
     const token = app.jwt.sign({ sub: user.id, email: user.email });
-    return { token, user: { id: user.id, name: user.name, email: user.email }, organizations: user.memberships.map(membershipView) };
+    return { token, user: { id: user.id, name: user.name, email: user.email, requestedRole: user.requestedRole }, organizations: user.memberships.map(membershipView) };
   });
 
   app.get("/me", { preHandler: [app.authenticate] }, async (request, reply) => {
@@ -60,7 +71,7 @@ export async function authRoutes(app: FastifyInstance) {
       include: { memberships: { include: { organization: true } } },
     });
     if (!user) return reply.code(404).send({ code: "USER_NOT_FOUND", message: "User not found" });
-    return { user: { id: user.id, name: user.name, email: user.email }, organizations: user.memberships.map(membershipView) };
+    return { user: { id: user.id, name: user.name, email: user.email, requestedRole: user.requestedRole }, organizations: user.memberships.map(membershipView) };
   });
 }
 

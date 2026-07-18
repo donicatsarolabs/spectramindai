@@ -1,5 +1,6 @@
 import { FileText, Pin, Printer, ScrollText } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   CMMC_FRAMEWORK_ID,
   getFrameworkLibrary,
@@ -55,19 +56,24 @@ const initialPoamMilestones = evidenceRows.reduce((milestones, row) => {
 
 export default function CMMCEvidencePage() {
   const { searchQuery, domainFilter, resetVersion, statusFilter } = useCMMCWorkspaceFilters();
+  const [searchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const selectedPolicyKey = searchParams.get("item") || searchParams.get("itemId") || "";
   return (
     <CMMCImplementationLayout>
       <CMMCEvidenceContent
-        key={resetVersion}
+        key={`${resetVersion}:${requestedTab || ""}:${selectedPolicyKey}`}
         searchQuery={searchQuery}
         domainFilter={domainFilter}
         statusFilter={statusFilter}
+        requestedTab={requestedTab}
+        selectedPolicyKey={selectedPolicyKey}
       />
     </CMMCImplementationLayout>
   );
 }
 
-function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter }) {
+function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requestedTab, selectedPolicyKey }) {
   const {
     scopeAnswers,
     organizationProfile,
@@ -78,7 +84,9 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter }) {
     updateControlWorkflowStatus,
     updateEvidenceWorkflowField,
   } = useCMMCWorkflowState();
-  const [activeTab, setActiveTab] = useState("ssp");
+  const [activeTab, setActiveTab] = useState(() =>
+    tabs.some((tab) => tab.id === requestedTab) ? requestedTab : "ssp"
+  );
   const [sspForm, setSspForm] = useState(initialSspForm);
   const [poamMilestones, setPoamMilestones] = useState(initialPoamMilestones);
   const normalizedSearch = searchQuery.trim().toLowerCase();
@@ -302,7 +310,7 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter }) {
         {activeTab === "poam" && (
           <POAMView rows={visiblePoamRows} notes={poamNotes} onChange={updatePoamNote} metrics={evidenceMetrics} organizationName={organizationProfile.organizationName} onExportPDF={exportPOAMToPDF} />
         )}
-        {activeTab === "policies" && <PolicyView policies={visiblePolicies} metrics={policyMetrics} organizationName={organizationProfile.organizationName} />}
+        {activeTab === "policies" && <PolicyView policies={visiblePolicies} metrics={policyMetrics} organizationName={organizationProfile.organizationName} selectedPolicyKey={selectedPolicyKey} />}
     </section>
   );
 }
@@ -465,8 +473,24 @@ function POAMView({ rows, notes, onChange, metrics, organizationName, onExportPD
   );
 }
 
-function PolicyView({ policies, metrics, organizationName }) {
+function PolicyView({ policies, metrics, organizationName, selectedPolicyKey }) {
   const displayOrganizationName = organizationName || "[Organization Name]";
+  const selectedPolicyRef = useRef(null);
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const openPolicyDocument = (policyKey) => {
+    const returnParams = new URLSearchParams(location.search);
+    returnParams.set("tab", "policies");
+    returnParams.set("item", policyKey);
+    navigate(`/policies/${encodeURIComponent(policyKey)}/document`, {
+      state: { returnTo: `${location.pathname}?${returnParams.toString()}` },
+    });
+  };
+
+  useEffect(() => {
+    selectedPolicyRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [selectedPolicyKey]);
 
   return (
     <div className="space-y-5">
@@ -491,19 +515,32 @@ function PolicyView({ policies, metrics, organizationName }) {
         </div>
       </section>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {policies.map((row) => (
-          <article key={`${row.domain}-${row.controlId}`} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-xs font-black uppercase tracking-wide text-slate-500">
+        {policies.map((row) => {
+          const isSelected = Boolean(selectedPolicyKey) &&
+            (row.key === selectedPolicyKey || row.controlId === selectedPolicyKey);
+
+          return (
+          <button
+            type="button"
+            key={row.key || `${row.domain}-${row.controlId}`}
+            ref={isSelected ? selectedPolicyRef : undefined}
+            onClick={() => openPolicyDocument(row.key)}
+            className={`rounded-lg border bg-white p-5 shadow-sm transition ${
+              isSelected ? "border-amber-500 ring-4 ring-amber-100" : "border-slate-200 hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-md"
+            }`}
+          >
+            <p className="text-left text-xs font-black uppercase tracking-wide text-slate-500">
               {row.section} - {row.family}
             </p>
-            <h2 className="mt-2 text-lg font-black text-slate-900">{row.controlId}</h2>
-            <p className="mt-3 line-clamp-3 min-h-16 text-sm font-semibold leading-6 text-slate-500">{row.evidence}</p>
+            <h2 className="mt-2 text-left text-lg font-black text-slate-900">{row.controlId}</h2>
+            <p className="mt-3 line-clamp-3 min-h-16 text-left text-sm font-semibold leading-6 text-slate-500">{row.evidence}</p>
             <div className="mt-4 flex items-center justify-between">
               <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">{row.evidenceStatus}</span>
-              <span className="text-xs font-bold text-slate-400">{row.sourceSystemTool}</span>
+              <span className="max-w-[55%] truncate text-xs font-bold text-slate-400">{row.sourceSystemTool || "Open document"}</span>
             </div>
-          </article>
-        ))}
+          </button>
+          );
+        })}
       </div>
     </div>
   );

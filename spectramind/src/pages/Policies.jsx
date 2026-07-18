@@ -1,19 +1,20 @@
 import { useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { FileText, Search, SlidersHorizontal, ChevronDown, X, ShieldAlert, Download, Settings, Upload } from "lucide-react";
+import { FileText, Search, SlidersHorizontal, ChevronDown, X, ShieldAlert, Download, Settings, Upload, Trash2, ExternalLink } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import { useComplianceState } from "../compliance/ComplianceStateContext";
 import { readScopedJson, writeScopedJson } from "../auth/session";
 import { useUser } from "../auth/UserContext";
-import { CMMC_FRAMEWORK_ID, resolveFrameworkId } from "../core/engines/framework-engine/frameworkRegistry";
+import { CMMC_FRAMEWORK_ID, getFrameworkLibrary, resolveFrameworkId } from "../core/engines/framework-engine/frameworkRegistry";
 import { useCMMCWorkflowState } from "../features/cmmc/hooks";
 import {
-  buildCMMCPolicyDocumentMetrics,
   buildCMMCPolicyDocumentRows,
 } from "../features/cmmc/services";
 import {
   archivePolicy,
+  buildDefaultPolicyDocument,
   canManagePolicies,
+  canPublishPolicies,
   createCustomPolicy,
   getPolicyMetrics,
   loadPolicyAcknowledgements,
@@ -125,14 +126,15 @@ export default function Policies() {
 function PoliciesContent({ activeFramework }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const { selectedFrameworks } = useFrameworkWorkspace();
+  const { selectedFrameworks, setActiveFramework } = useFrameworkWorkspace();
   const targetItemId = new URLSearchParams(location.search).get("item");
-  const { policies: frameworkPolicies, workspaceData, actions } = useComplianceState();
-  const { controlWorkflowFields, evidenceWorkflowFields } = useCMMCWorkflowState();
+  const { policies: frameworkPolicies, tests: frameworkTests, workspaceData, actions } = useComplianceState();
+  const { controlWorkflowFields, evidenceWorkflowFields, updateControlWorkflowStatus } = useCMMCWorkflowState();
   const { user } = useUser();
   const isCMMCWorkspace = resolveFrameworkId(activeFramework.id) === CMMC_FRAMEWORK_ID;
   const canManage = canManagePolicies(user);
-  const canEditGenericPolicies = canManage && !isCMMCWorkspace;
+  const canPublish = canPublishPolicies(user);
+  const canEditGenericPolicies = canPublish && !isCMMCWorkspace;
   const [employees, setEmployees] = useState(() => readScopedJson("spectramind:employees", []));
   const [policyLibrary, setPolicyLibrary] = useState(() => loadPolicyLibrary(activeFramework.id, frameworkPolicies, activeFramework));
   const [policyAssignments, setPolicyAssignments] = useState(() =>
@@ -246,6 +248,13 @@ function PoliciesContent({ activeFramework }) {
   };
 
   const handlePublish = async (policyId) => {
+    if (!canPublish) return;
+    if (isCMMCWorkspace) {
+      const cmmcPolicy = policies.find((item) => item.id === policyId);
+      const controlId = cmmcPolicy?.policy?.sourcePolicy?.controlId;
+      if (controlId) updateControlWorkflowStatus(controlId, "Completed");
+      return;
+    }
     if (!canEditGenericPolicies) return;
     const policy = policyLibrary.find((item) => item.id === policyId);
     if (isApiEnabled) { try { const updated = await updatePolicyApi(policyId, policy.apiVersion, { status: "ACTIVE" }); policy.apiVersion = updated.version; } catch (error) { setApiError(error.message); return; } }
@@ -356,10 +365,14 @@ function PoliciesContent({ activeFramework }) {
       }),
     [controlWorkflowFields, evidenceWorkflowFields]
   );
-  const cmmcPolicyMetrics = useMemo(
-    () => buildCMMCPolicyDocumentMetrics(cmmcPolicyDocumentRows),
-    [cmmcPolicyDocumentRows]
-  );
+  const cmmcStoredPolicies = isCMMCWorkspace
+    ? loadPolicyLibrary(
+        activeFramework.id,
+        cmmcPolicyDocumentRows.map(cmmcRowToLibraryPolicy),
+        activeFramework
+      )
+    : [];
+  const cmmcStoredPoliciesById = new Map(cmmcStoredPolicies.map((policy) => [policy.id, policy]));
   const genericPolicies = policyLibrary.map((p) => {
     const saved = workspaceData[p.id] ?? {};
     const activeAcks = acknowledgementsState[p.id] || {};
@@ -386,22 +399,25 @@ function PoliciesContent({ activeFramework }) {
       frameworks: p.relatedFrameworks.join(", "),
       otherFrameworks: "-",
       tags: ["All Staff"],
-      documentName: p.document?.name || `${p.name.replace(/[\/\s+]/g, "_").toLowerCase()}.docx`,
+      documentName: p.document?.name || "",
       documentDate: p.document?.uploadedAt ? new Date(p.document.uploadedAt).toLocaleDateString() : p.effectiveDate || "-",
       acknowledgements: acknowledgementsList,
       metrics,
       policy: p,
-      connectedTests: sourcePolicy.linkedControls?.map((ctrlId) => ({
-        id: ctrlId,
-        title: ctrlId,
-        description: `Organization's documented ${p.name.toLowerCase()}...`,
-        owner: saved.assignments?.owner || "Unassigned",
-        status: "READY"
-      })) || []
+      connectedTests: (sourcePolicy.linkedTests || []).map((testId) => {
+        const test = frameworkTests.find((item) => item.id === testId);
+        return {
+          id: testId,
+          title: test?.title || testId,
+          description: test?.description || test?.guidance || test?.title || testId,
+          owner: workspaceData[testId]?.assignments?.owner || test?.owner || "Unassigned",
+          status: workspaceData[testId]?.status || test?.status || "Not Started",
+        };
+      })
     };
   });
   const policies = isCMMCWorkspace
-    ? cmmcPolicyDocumentRows.map((row) => buildCMMCPolicyPageRow(row, activeFramework))
+    ? cmmcPolicyDocumentRows.map((row) => buildCMMCPolicyPageRow(row, activeFramework, cmmcStoredPoliciesById.get(row.key)))
     : genericPolicies;
 
 
@@ -419,11 +435,13 @@ function PoliciesContent({ activeFramework }) {
   const filterMenuRef = useRef(null);
   const sortMenuRef = useRef(null);
   const settingsMenuRef = useRef(null);
-  const visiblePolicies = isCMMCWorkspace
+  const visiblePolicies = canPublish
     ? policies
-    : canManage
-    ? policies
-    : policies.filter((policy) => currentEmployee && (policyAssignments[policy.id] || []).includes(currentEmployee.id));
+    : policies.filter((policy) => {
+        const isPredefined = policy.policy?.custom !== true;
+        const isPublished = ["active", "published"].includes(String(policy.status || "").toLowerCase());
+        return isPredefined || isPublished;
+      });
 
   useEffect(() => {
     const refresh = () => {
@@ -467,6 +485,7 @@ function PoliciesContent({ activeFramework }) {
     };
   }, [filterOpen, sortOpen, settingsOpen]);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- synchronize drawer selection with deep links and loaded policies */
   useEffect(() => {
     if (targetItemId && visiblePolicies.some((policy) => policy.id === targetItemId)) {
       setDrawerClosed(false);
@@ -477,9 +496,16 @@ function PoliciesContent({ activeFramework }) {
       setSelectedPolicyId(visiblePolicies[0].id);
     }
   }, [targetItemId, visiblePolicies, selectedPolicyId, drawerClosed]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const selectedPolicy = visiblePolicies.find((p) => p.id === selectedPolicyId);
   const openImplementationRecord = (itemId, itemType = "Control") => {
+    if (isCMMCWorkspace) {
+      const policyKey = selectedPolicy?.id || itemId;
+      navigate(`/cmmc/evidence?tab=policies&item=${encodeURIComponent(policyKey)}`);
+      return;
+    }
+
     const target = buildCrossModuleTarget({
       activeFramework,
       itemId,
@@ -497,6 +523,7 @@ function PoliciesContent({ activeFramework }) {
       ...currentState,
       status: "complete", // switches legacy flow to active flow
       timeline: [
+        // eslint-disable-next-line react-hooks/purity
         { id: `archive-${Date.now()}`, label: "Policy archived and legacy flow cleared" },
         ...(currentState.timeline ?? []),
       ],
@@ -576,6 +603,40 @@ function PoliciesContent({ activeFramework }) {
     event.target.value = "";
   };
 
+  const handleSelectedPolicyDocument = (event) => {
+    const file = event.target.files?.[0];
+    if (!file || !selectedPolicy || !canEditGenericPolicies) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      updatePolicyField(selectedPolicy.id, {
+        document: {
+          name: file.name,
+          type: file.type || "application/octet-stream",
+          size: file.size,
+          uploadedAt: new Date().toISOString(),
+          dataUrl: reader.result,
+        },
+      });
+    };
+    reader.readAsDataURL(file);
+    event.target.value = "";
+  };
+
+  const handleDeleteSelectedPolicyDocument = () => {
+    if (!selectedPolicy || !canEditGenericPolicies) return;
+    updatePolicyField(selectedPolicy.id, { document: null });
+  };
+
+  const openSelectedPolicyDocument = () => {
+    if (!selectedPolicy) return;
+    const returnParams = new URLSearchParams(location.search);
+    returnParams.set("item", selectedPolicy.id);
+    navigate(`/policies/${encodeURIComponent(selectedPolicy.id)}/document`, {
+      state: { returnTo: `${location.pathname}?${returnParams.toString()}` },
+    });
+  };
+
   const matchesStatusFilter = (policy) => {
     const status = String(policy.status || "").toLowerCase();
     if (statusFilter === "published") return status.includes("published");
@@ -631,7 +692,8 @@ function PoliciesContent({ activeFramework }) {
     const frameworkPolicies = visiblePolicies.filter((policy) =>
       String(policy.frameworks || "").toLowerCase().includes(frameworkName.toLowerCase())
     );
-    const applicableCount = frameworkPolicies.length || (framework.id === activeFramework.id ? totalPolicies : 0);
+    const mappedPolicyCount = getMappedPolicyCount(framework.id);
+    const applicableCount = frameworkPolicies.length || (framework.id === activeFramework.id ? totalPolicies : mappedPolicyCount);
     const publishedCount = frameworkPolicies.length
       ? frameworkPolicies.filter((policy) => String(policy.status).toLowerCase().includes("published")).length
       : framework.id === activeFramework.id
@@ -828,7 +890,7 @@ function PoliciesContent({ activeFramework }) {
             <h3 className="text-sm font-black text-slate-900 dark:text-white">Frameworks</h3>
             <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {frameworkCards.map((framework) => (
-                <div key={framework.id} className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+                <button type="button" onClick={() => setActiveFramework(framework.id)} key={framework.id} className={`rounded-lg border bg-white p-4 text-left shadow-sm transition hover:border-blue-300 dark:bg-slate-900 ${framework.id === activeFramework.id ? "border-blue-500 ring-2 ring-blue-100" : "border-slate-200 dark:border-slate-800"}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-black text-slate-900 dark:text-white">{framework.name}</p>
@@ -853,7 +915,7 @@ function PoliciesContent({ activeFramework }) {
                       <span>{acknowledgementPercentage}%</span>
                     </div>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </div>
@@ -1159,7 +1221,7 @@ function PoliciesContent({ activeFramework }) {
 
           {/* Right Policy Drawer */}
           {selectedPolicy && (
-            <aside className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950 space-y-6">
+            <aside className="sticky top-24 max-h-[calc(100vh-7rem)] min-w-0 space-y-6 overflow-y-auto overflow-x-hidden rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
               <div className="flex items-start justify-between border-b border-slate-100 pb-4 dark:border-slate-800">
                 <div className="space-y-1">
                   <h2 className="text-lg font-black text-slate-950 dark:text-white">
@@ -1181,7 +1243,7 @@ function PoliciesContent({ activeFramework }) {
                 </button>
               </div>
 
-              {canEditGenericPolicies ? (
+              {canPublish ? (
                 <div className="grid gap-2">
                   <div className="flex flex-wrap gap-2">
                     <button
@@ -1191,7 +1253,7 @@ function PoliciesContent({ activeFramework }) {
                     >
                       Publish
                     </button>
-                    <button
+                    {!isCMMCWorkspace ? <button
                       type="button"
                       onClick={() => {
                         handleArchivePolicy(selectedPolicy.id);
@@ -1200,8 +1262,9 @@ function PoliciesContent({ activeFramework }) {
                       className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50"
                     >
                       Archive
-                    </button>
+                    </button> : null}
                   </div>
+                  {!isCMMCWorkspace ? <>
                   <input
                     value={selectedPolicy.policy.name}
                     onChange={(event) => updatePolicyField(selectedPolicy.id, { name: event.target.value })}
@@ -1238,6 +1301,7 @@ function PoliciesContent({ activeFramework }) {
                       className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold outline-none"
                     />
                   </div>
+                  </> : null}
                 </div>
               ) : null}
 
@@ -1356,27 +1420,41 @@ function PoliciesContent({ activeFramework }) {
               ) : null}
 
               {/* Uploaded Policy Documents */}
-              {selectedPolicy.documentName ? (
-                <div className="space-y-2">
+              {selectedPolicy.documentName || canEditGenericPolicies ? (
+                <div className="min-w-0 space-y-2">
                   <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Uploaded Policy Documents</h4>
-                  <div className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
-                    <div className="flex items-center gap-3">
+                  {selectedPolicy.documentName ? (
+                  <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg border border-slate-100 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+                    <button type="button" onClick={openSelectedPolicyDocument} className="flex min-w-0 flex-1 items-center gap-3 text-left">
                       <div className="rounded bg-blue-50 p-2 text-blue-600">
                         <FileText size={18} />
                       </div>
-                      <div>
-                        <p className="text-sm font-black text-slate-900 dark:text-white">{selectedPolicy.documentName}</p>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-black text-slate-900 dark:text-white" title={selectedPolicy.documentName}>{selectedPolicy.documentName}</p>
                         <p className="text-[10px] font-semibold text-slate-400">{selectedPolicy.documentDate}</p>
                       </div>
-                    </div>
+                    </button>
+                    <div className="flex shrink-0 items-center gap-1">
+                    <button type="button" onClick={openSelectedPolicyDocument} className="rounded-md p-2 text-slate-400 hover:bg-white hover:text-blue-700" aria-label="Open policy document"><ExternalLink size={16} /></button>
                     <button
                       type="button"
                       onClick={() => handleDownloadPolicy(selectedPolicy)}
-                      className="text-slate-400 hover:text-slate-700"
+                      className="rounded-md p-2 text-slate-400 hover:bg-white hover:text-slate-700"
+                      aria-label="Download policy document"
                     >
                       <Download size={16} />
                     </button>
+                    {canEditGenericPolicies ? <button type="button" onClick={handleDeleteSelectedPolicyDocument} className="rounded-md p-2 text-slate-400 hover:bg-rose-50 hover:text-rose-700" aria-label="Delete policy document"><Trash2 size={16} /></button> : null}
+                    </div>
                   </div>
+                  ) : <p className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-xs font-bold text-slate-500">No policy document uploaded.</p>}
+                  {canEditGenericPolicies ? (
+                    <label className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-50">
+                      <Upload size={15} />
+                      {selectedPolicy.documentName ? "Replace document" : "Upload document"}
+                      <input type="file" className="hidden" onChange={handleSelectedPolicyDocument} accept=".pdf,.doc,.docx,.txt,.md,.rtf,.csv,.xlsx,.xls,.png,.jpg,.jpeg" />
+                    </label>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -1441,7 +1519,7 @@ function PoliciesContent({ activeFramework }) {
                       <button
                         type="button"
                         key={t.id || t.title}
-                        onClick={() => openImplementationRecord(t.id, "Control")}
+                        onClick={() => openImplementationRecord(t.id, isCMMCWorkspace ? "Control" : "Test")}
                         className="w-full rounded-lg border border-slate-150 p-4 text-left space-y-3 bg-[#fffdf8]/30 transition hover:bg-blue-50/40 dark:border-slate-800"
                       >
                         <p className="text-sm font-bold text-slate-900 leading-relaxed">{t.description || t.title}</p>
@@ -1589,11 +1667,16 @@ function MenuButton({ active, onClick, children }) {
   );
 }
 
-function buildCMMCPolicyPageRow(row, activeFramework) {
+function buildCMMCPolicyPageRow(row, activeFramework, storedPolicy) {
   const frameworkName = activeFramework?.shortName || activeFramework?.name || "CMMC";
   const owner = row.ownerCollector || "Unassigned";
   const title = row.controlId || row.key || "";
   const description = row.evidence || row.requirement || "";
+  const document = storedPolicy?.document || buildDefaultPolicyDocument({
+    title,
+    description,
+    relatedControls: [row.controlId].filter(Boolean),
+  }, frameworkName);
 
   return {
     id: row.key,
@@ -1608,8 +1691,8 @@ function buildCMMCPolicyPageRow(row, activeFramework) {
     frameworks: frameworkName,
     otherFrameworks: "",
     tags: [row.domain].filter(Boolean),
-    documentName: "",
-    documentDate: "",
+    documentName: document.name,
+    documentDate: document.uploadedAt ? new Date(document.uploadedAt).toLocaleDateString() : "",
     acknowledgements: [],
     metrics: {
       assigned: 0,
@@ -1626,25 +1709,28 @@ function buildCMMCPolicyPageRow(row, activeFramework) {
       effectiveDate: row.dateCollected || "",
       reviewDate: "",
       versionHistory: [],
+      document,
       sourcePolicy: row,
     },
-    connectedTests: row.controlId
-      ? [
-          {
-            id: row.controlId,
-            title: row.controlId,
-            description: row.requirement,
-            owner,
-            status: row.policyStatus,
-          },
-        ]
-      : [],
+    connectedTests: [],
+  };
+}
+
+function cmmcRowToLibraryPolicy(row) {
+  return {
+    id: row.key,
+    title: row.controlId || row.key,
+    description: row.evidence || row.requirement || "",
+    status: row.policyStatus,
+    linkedControls: [row.controlId].filter(Boolean),
+    linkedTests: [],
   };
 }
 
 function fromApiPolicy(policy, activeFramework) {
   const date = (value) => value ? new Date(value).toISOString().slice(0, 10) : "";
   const statuses = { DRAFT: "Draft", ACTIVE: "Active", ARCHIVED: "Archived" };
+  const predefinedPolicyIds = new Set((getFrameworkLibrary(activeFramework.id)?.policies || []).map((item) => item.id));
   return {
     id: policy.id,
     name: policy.name,
@@ -1660,7 +1746,7 @@ function fromApiPolicy(policy, activeFramework) {
     status: statuses[policy.status] || "Draft",
     requireReacknowledgement: true,
     versionHistory: [],
-    custom: policy.custom,
+    custom: policy.custom ?? !predefinedPolicyIds.has(policy.id),
     apiAssignments: policy.assignments || [],
   };
 }
@@ -1695,4 +1781,17 @@ function loadPolicyFields(frameworkId) {
 
 function policyFieldsStorageKey(frameworkId) {
   return `${POLICY_FIELDS_KEY}:${frameworkId || "default"}`;
+}
+
+function getMappedPolicyCount(frameworkId) {
+  const library = getFrameworkLibrary(frameworkId);
+  if (!library) return 0;
+  if (library.policies?.length) return library.policies.length;
+  if (resolveFrameworkId(frameworkId) === CMMC_FRAMEWORK_ID) {
+    return (library.mappings || []).reduce(
+      (total, mapping) => total + (mapping.evidenceRequirementIds || mapping.evidenceIds || []).length,
+      0
+    );
+  }
+  return 0;
 }

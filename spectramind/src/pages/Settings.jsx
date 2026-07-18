@@ -1,5 +1,7 @@
 import { UploadCloud, X } from "lucide-react";
 import { useState } from "react";
+import { useUser } from "../auth/UserContext";
+import { writeScopedJson } from "../auth/session";
 import AppShell from "../components/layout/AppShell";
 import {
   APP_NAME,
@@ -9,7 +11,11 @@ import {
 
 export default function Settings() {
   const organizationLogo = useOrganizationLogo();
+  const { user, updateUser } = useUser();
   const [uploadError, setUploadError] = useState("");
+  const [organizationName, setOrganizationName] = useState(user?.organizationName || APP_NAME);
+  const [contactEmail, setContactEmail] = useState(user?.contactEmail || user?.email || "");
+  const [saved, setSaved] = useState(false);
 
   const handleLogoUpload = (event) => {
     const input = event.currentTarget;
@@ -63,8 +69,8 @@ export default function Settings() {
 
         <section className="max-w-3xl rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="grid gap-5">
-            <Field label="Organization Name" defaultValue={APP_NAME} />
-            <Field label="Contact Email" defaultValue="admin@spectramind.ai" />
+            <Field label="Organization Name" value={organizationName} onChange={setOrganizationName} />
+            <Field label="Contact Email" value={contactEmail} onChange={setContactEmail} type="email" />
             <div>
               <span className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-200">
                 Organization Logo
@@ -123,7 +129,8 @@ export default function Settings() {
             </div>
           </div>
 
-          <button className="mt-6 rounded-lg bg-primary px-5 py-3 font-semibold text-white transition hover:bg-blue-700">
+          {saved && <p className="mt-4 text-sm font-semibold text-emerald-700">Organization settings saved.</p>}
+          <button onClick={() => { const next = { organizationName: organizationName.trim(), contactEmail: contactEmail.trim() }; updateUser(next); writeScopedJson("spectramind:organization-profile", next); setSaved(true); }} className="mt-6 rounded-lg bg-primary px-5 py-3 font-semibold text-white transition hover:bg-blue-700">
             Save Changes
           </button>
         </section>
@@ -132,7 +139,7 @@ export default function Settings() {
   );
 }
 
-function Field({ label, defaultValue }) {
+function Field({ label, value, onChange, type = "text" }) {
   return (
     <label className="block">
       <span className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-200">
@@ -140,7 +147,9 @@ function Field({ label, defaultValue }) {
       </span>
       <input
         className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:ring-blue-950"
-        defaultValue={defaultValue}
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
       />
     </label>
   );

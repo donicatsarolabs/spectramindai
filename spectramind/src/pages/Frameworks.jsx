@@ -2,14 +2,19 @@ import { ArrowRight, ShieldCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 import AppShell from "../components/layout/AppShell";
 import { useFrameworkWorkspace } from "../framework/FrameworkWorkspaceContext";
+import { useUser } from "../auth/UserContext";
+import { canManageWorkspace } from "../auth/session";
 
 export default function Frameworks() {
+  const { user } = useUser();
+  const canManage = canManageWorkspace(user?.role);
   const {
     selectedFrameworks,
     availableFrameworks,
     activeFrameworkId,
-    selectFramework,
     setActiveFramework,
+    addToCart,
+    cartFrameworks,
   } = useFrameworkWorkspace();
 
   return (
@@ -34,6 +39,7 @@ export default function Frameworks() {
           activeFrameworkId={activeFrameworkId}
           actionLabel="Switch Framework"
           onAction={setActiveFramework}
+          canManage
           selected
         />
 
@@ -41,9 +47,16 @@ export default function Frameworks() {
           title="Available Frameworks"
           frameworks={availableFrameworks}
           activeFrameworkId={activeFrameworkId}
-          actionLabel="Select Framework"
-          onAction={selectFramework}
+          actionLabel="Add to Cart"
+          onAction={addToCart}
+          cartFrameworkIds={cartFrameworks.map(framework => framework.id)}
+          canManage={canManage}
         />
+        {!canManage && (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900">
+            You can use any selected framework. Only an Admin or Manager can add another framework.
+          </p>
+        )}
       </div>
     </AppShell>
   );
@@ -56,7 +69,9 @@ function FrameworkSection({
   activeFrameworkId,
   actionLabel,
   onAction,
+  canManage,
   selected = false,
+  cartFrameworkIds = [],
 }) {
   return (
     <section className="space-y-4">
@@ -78,6 +93,8 @@ function FrameworkSection({
               selected={selected}
               actionLabel={actionLabel}
               onAction={onAction}
+              canManage={canManage}
+              inCart={cartFrameworkIds.includes(framework.id)}
             />
           ))}
         </div>
@@ -86,7 +103,7 @@ function FrameworkSection({
   );
 }
 
-function FrameworkCard({ framework, isActive, selected, actionLabel, onAction }) {
+function FrameworkCard({ framework, isActive, selected, actionLabel, onAction, canManage, inCart }) {
   const implementationPath = framework.slug === "cmmc" ? "/cmmc" : `/implementation?framework=${framework.slug}`;
 
   return (
@@ -113,15 +130,23 @@ function FrameworkCard({ framework, isActive, selected, actionLabel, onAction })
       <button
         type="button"
         onClick={() => onAction(framework.id)}
-        className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-semibold text-white transition hover:bg-blue-700"
+        disabled={!canManage || inCart}
+        title={!canManage ? "Only an Admin or Manager can manage frameworks" : undefined}
+        className="mt-6 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-4 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-600"
       >
-        {isActive ? "Active Framework" : actionLabel}
+        {!canManage ? "Admin or Manager required" : inCart ? "Added to Cart" : isActive ? "Active Framework" : actionLabel}
       </button>
 
       {selected && (
         <Link
           to={implementationPath}
-          onClick={() => onAction(framework.id)}
+          onClick={(event) => {
+            if (!canManage && !isActive) {
+              event.preventDefault();
+              return;
+            }
+            if (canManage) onAction(framework.id);
+          }}
           className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-200"
         >
           Open Workspace

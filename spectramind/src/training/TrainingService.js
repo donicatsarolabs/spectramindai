@@ -5,7 +5,7 @@ export const TRAINING_ASSIGNMENTS_KEY = "spectramind:training-assignments";
 export const TRAINING_COMPLETIONS_KEY = "spectramind:training-completions";
 export const TRAINING_STATUS_KEY = "spectramind:employee-training-status";
 
-export const MANAGER_ROLES = new Set(["Admin", "Compliance Manager", "Security Manager", "HR"]);
+export const MANAGER_ROLES = new Set(["Admin", "Manager", "Compliance Manager", "Security Manager", "HR"]);
 
 export const DEFAULT_TRAINING_LIBRARY = [
   training("soc2-security-awareness", "Security Awareness", "Core security practices for SOC 2 readiness.", ["SOC 2"]),

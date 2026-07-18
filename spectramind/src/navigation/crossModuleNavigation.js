@@ -37,7 +37,11 @@ const CMMC_MODULE_PATHS = {
 
 export function buildCrossModuleTarget({ activeFramework, itemId, itemType, moduleContext = "", mode = "view" }) {
   const normalizedType = normalizeItemType(itemType);
-  const frameworkId = activeFramework?.id || activeFramework?.slug || activeFramework || "";
+  // Routes identify a framework by its public slug (for example `soc-2`),
+  // while the engine uses an internal id (for example `soc2-type-ii`).
+  // Prefer the slug so destination pages can resolve the selected framework
+  // before applying the exact item deep link.
+  const frameworkId = activeFramework?.slug || activeFramework?.id || activeFramework || "";
   const path = isCMMCFramework(frameworkId)
     ? getCMMCModulePath(normalizedType, itemId, moduleContext)
     : MODULE_PATHS[normalizedType] || "/implementation";

@@ -1,8 +1,12 @@
 import { useUser } from "../auth/UserContext";
 import AppShell from "../components/layout/AppShell";
+import { useState } from "react";
 
 export default function ProfileSettings() {
-  const { user } = useUser();
+  const { user, updateUser } = useUser();
+  const [name, setName] = useState(user?.name || "");
+  const [email, setEmail] = useState(user?.email || "");
+  const [saved, setSaved] = useState(false);
 
   return (
     <AppShell>
@@ -21,12 +25,13 @@ export default function ProfileSettings() {
 
         <section className="max-w-3xl rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="grid gap-5">
-            <Field label="Full Name" defaultValue={user?.name || ""} />
-            <Field label="Email" defaultValue={user?.email || ""} />
-            <Field label="Password" defaultValue="password" type="password" />
+            <Field label="Full Name" value={name} onChange={setName} />
+            <Field label="Email" value={email} onChange={setEmail} type="email" />
+            <Field label="Password" value="" onChange={() => {}} type="password" placeholder="Leave blank to keep current password" />
           </div>
 
-          <button className="mt-6 rounded-lg bg-primary px-5 py-3 font-semibold text-white transition hover:bg-blue-700">
+          {saved && <p className="mt-4 text-sm font-semibold text-emerald-700">Profile updated successfully.</p>}
+          <button onClick={() => { updateUser({ name: name.trim(), email: email.trim().toLowerCase() }); setSaved(true); }} className="mt-6 rounded-lg bg-primary px-5 py-3 font-semibold text-white transition hover:bg-blue-700">
             Update Profile
           </button>
         </section>
@@ -35,7 +40,7 @@ export default function ProfileSettings() {
   );
 }
 
-function Field({ label, defaultValue, type = "text" }) {
+function Field({ label, value, onChange, type = "text", placeholder }) {
   return (
     <label className="block">
       <span className="mb-2 block text-sm font-semibold text-slate-700 dark:text-slate-200">
@@ -44,7 +49,9 @@ function Field({ label, defaultValue, type = "text" }) {
       <input
         type={type}
         className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-950 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:focus:ring-blue-950"
-        defaultValue={defaultValue}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
       />
     </label>
   );

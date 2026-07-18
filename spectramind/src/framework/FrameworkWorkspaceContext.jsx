@@ -4,6 +4,7 @@ import { getFrameworkLibrary, resolveFrameworkId } from "../core/engines/framewo
 import { apiRequest, getApiSession, isApiEnabled } from "../api/client";
 
 const STORAGE_KEY = "spectramind:framework-workspace";
+const CART_STORAGE_KEY = "spectramind:framework-cart";
 
 export const FRAMEWORK_CATALOG = [
   {
@@ -54,9 +55,14 @@ const FrameworkWorkspaceContext = createContext(null);
 
 export function FrameworkWorkspaceProvider({ children }) {
   const [workspace, setWorkspace] = useState(() => loadFrameworkWorkspace());
+  const [cartFrameworkIds, setCartFrameworkIds] = useState(() => loadFrameworkCart());
+  const [isCartOpen, setIsCartOpen] = useState(false);
 
   useEffect(() => {
-    const refresh = () => setWorkspace(loadFrameworkWorkspace());
+    const refresh = () => {
+      setWorkspace(loadFrameworkWorkspace());
+      setCartFrameworkIds(loadFrameworkCart());
+    };
 
     window.addEventListener("spectramind:framework-workspace-updated", refresh);
     window.addEventListener("spectramind:session-updated", refresh);
@@ -139,6 +145,49 @@ export function FrameworkWorkspaceProvider({ children }) {
     [persistWorkspace, workspace]
   );
 
+  const addToCart = useCallback((frameworkIdOrSlug) => {
+    const framework = getFrameworkByIdOrSlug(frameworkIdOrSlug);
+    if (!framework || workspace.selectedFrameworkIds.includes(framework.id)) return null;
+    const next = cartFrameworkIds.includes(framework.id) ? cartFrameworkIds : [...cartFrameworkIds, framework.id];
+    persistFrameworkCart(next);
+    setCartFrameworkIds(next);
+    setIsCartOpen(true);
+    return framework;
+  }, [cartFrameworkIds, workspace.selectedFrameworkIds]);
+
+  const removeFromCart = useCallback((frameworkIdOrSlug) => {
+    const framework = getFrameworkByIdOrSlug(frameworkIdOrSlug);
+    if (!framework) return;
+    const next = cartFrameworkIds.filter(id => id !== framework.id);
+    persistFrameworkCart(next);
+    setCartFrameworkIds(next);
+  }, [cartFrameworkIds]);
+
+  const clearCart = useCallback(() => {
+    persistFrameworkCart([]);
+    setCartFrameworkIds([]);
+  }, []);
+
+  const checkoutCart = useCallback(async () => {
+    const validIds = cartFrameworkIds.filter(id => !workspace.selectedFrameworkIds.includes(id));
+    if (!validIds.length) return [];
+    if (isApiEnabled && getApiSession()?.token) {
+      await apiRequest("/api/v1/organization-frameworks/checkout", {
+        method: "POST",
+        body: JSON.stringify({ frameworkIds: validIds.map(id => {
+          const framework = getFrameworkByIdOrSlug(id);
+          return resolveFrameworkId(framework?.slug) || framework?.id;
+        }) }),
+      });
+    }
+    const selectedFrameworkIds = [...workspace.selectedFrameworkIds, ...validIds];
+    persistWorkspace({ selectedFrameworkIds, activeFrameworkId: workspace.activeFrameworkId || validIds[0] });
+    persistFrameworkCart([]);
+    setCartFrameworkIds([]);
+    setIsCartOpen(false);
+    return validIds.map(getFrameworkByIdOrSlug).filter(Boolean);
+  }, [cartFrameworkIds, persistWorkspace, workspace]);
+
   const selectedFrameworks = useMemo(
     () => workspace.selectedFrameworkIds.map(getFrameworkByIdOrSlug).filter(Boolean),
     [workspace.selectedFrameworkIds]
@@ -153,6 +202,10 @@ export function FrameworkWorkspaceProvider({ children }) {
     () => getFrameworkByIdOrSlug(workspace.activeFrameworkId),
     [workspace.activeFrameworkId]
   );
+  const cartFrameworks = useMemo(
+    () => cartFrameworkIds.map(getFrameworkByIdOrSlug).filter(Boolean),
+    [cartFrameworkIds]
+  );
 
   const value = useMemo(
     () => ({
@@ -162,6 +215,14 @@ export function FrameworkWorkspaceProvider({ children }) {
       availableFrameworks,
       activeFrameworkId: activeFramework?.id || "",
       activeFramework,
+      cartFrameworks,
+      cartCount: cartFrameworks.length,
+      isCartOpen,
+      setIsCartOpen,
+      addToCart,
+      removeFromCart,
+      clearCart,
+      checkoutCart,
       selectFramework,
       setActiveFramework,
       isFrameworkSelected: (frameworkIdOrSlug) => {
@@ -169,7 +230,7 @@ export function FrameworkWorkspaceProvider({ children }) {
         return Boolean(framework && workspace.selectedFrameworkIds.includes(framework.id));
       },
     }),
-    [activeFramework, availableFrameworks, selectFramework, selectedFrameworks, setActiveFramework, workspace.selectedFrameworkIds]
+    [activeFramework, addToCart, availableFrameworks, cartFrameworks, checkoutCart, clearCart, isCartOpen, removeFromCart, selectFramework, selectedFrameworks, setActiveFramework, workspace.selectedFrameworkIds]
   );
 
   return (
@@ -234,6 +295,21 @@ function persistFrameworkWorkspace(workspace) {
   window.dispatchEvent(new Event("spectramind:active-framework-updated"));
   window.dispatchEvent(new Event("spectramind:workspace-updated"));
   window.dispatchEvent(new Event("spectramind:questionnaire-updated"));
+}
+
+function loadFrameworkCart() {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(getOrganizationScopedStorageKey(CART_STORAGE_KEY));
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? [...new Set(parsed.filter(id => getFrameworkByIdOrSlug(id)))] : [];
+  } catch { return []; }
+}
+
+function persistFrameworkCart(ids) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(getOrganizationScopedStorageKey(CART_STORAGE_KEY), JSON.stringify(ids));
+  window.dispatchEvent(new Event("spectramind:framework-workspace-updated"));
 }
 
 function emptyWorkspace() {

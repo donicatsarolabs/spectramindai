@@ -11,6 +11,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useUser } from "../auth/UserContext";
 import { APP_NAME } from "../core/adapters/useOrganizationBranding";
 import { isApiEnabled } from "../api/client";
+import { findLocalAccount, findLocalInvitations } from "../data/localAccounts";
 
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 
@@ -33,7 +34,13 @@ export default function Login() {
   const handleGoogleCredential = useCallback(
     (response) => {
       const profile = decodeJwt(response.credential);
+      const existingAccount = findLocalAccount(profile.email);
+      if (!existingAccount) {
+        navigate("/signup", { state: { notice: "User not present. Create an account to continue.", email: profile.email, name: profile.name } });
+        return;
+      }
       login({
+        ...existingAccount,
         id: profile.sub,
         email: profile.email,
         name: profile.name,
@@ -97,9 +104,17 @@ export default function Login() {
     setSubmitting(true);
     setLoginError("");
     try {
-      await loginWithPassword(email, password, { remember: true });
-      navigate("/dashboard");
+      const nextSession = await loginWithPassword(email, password, { remember: true });
+      if (!nextSession.onboardingComplete) {
+        navigate(findLocalInvitations(nextSession.email).length ? "/join-organization" : nextSession.role === "User" ? "/join-organization" : "/onboarding/organization");
+      } else {
+        navigate("/dashboard");
+      }
     } catch (error) {
+      if (error.code === "USER_NOT_FOUND" || error.status === 404) {
+        navigate("/signup", { state: { notice: "User not present. Create an account to continue.", email } });
+        return;
+      }
       setLoginError(error.message || "Sign in failed");
     } finally {
       setSubmitting(false);
@@ -273,7 +288,7 @@ export default function Login() {
             </form>
 
             <p className="mt-8 text-center text-sm text-slate-500">
-              Need access? Contact your {APP_NAME} administrator.
+              New to {APP_NAME}? <Link to="/signup" className="font-bold text-blue-700 hover:text-blue-800">Create an account</Link>
             </p>
           </div>
         </section>

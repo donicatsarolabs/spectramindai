@@ -54,16 +54,27 @@ export async function apiRequestRaw(path, options = {}) {
 export async function loginWithApi(email, password) {
   const response = await apiRequest("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
   const organization = response.organizations[0];
-  if (!organization) throw new Error("Your account is not assigned to an organization");
-  persistApiSession({ token: response.token, organizationId: organization.id });
+  persistApiSession({ token: response.token, organizationId: organization?.id || null });
   return {
     userId: response.user.id,
     name: response.user.name,
     email: response.user.email,
-    organizationId: organization.id,
-    organizationName: organization.name,
-    role: roleLabel(organization.role),
+    organizationId: organization?.id,
+    organizationName: organization?.name,
+    role: roleLabel(organization?.role || response.user.requestedRole),
+    onboardingComplete: Boolean(organization),
     apiAuthenticated: true,
+  };
+}
+
+export async function registerWithApi(input) {
+  const response = await apiRequest("/api/v1/auth/register", { method: "POST", body: JSON.stringify(input) });
+  const organization = response.organizations[0];
+  persistApiSession({ token: response.token, organizationId: organization?.id || null });
+  return {
+    userId: response.user.id, name: response.user.name, email: response.user.email,
+    organizationId: organization?.id, organizationName: organization?.name,
+    role: roleLabel(organization?.role || response.user.requestedRole), onboardingComplete: Boolean(organization), apiAuthenticated: true,
   };
 }
 

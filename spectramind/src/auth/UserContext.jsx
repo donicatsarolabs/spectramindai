@@ -6,6 +6,7 @@ import {
   persistSession,
 } from "./session";
 import { clearApiSession, isApiEnabled, loginWithApi } from "../api/client";
+import { authenticateLocalAccount } from "../data/localAccounts";
 
 const UserContext = createContext(null);
 
@@ -32,7 +33,25 @@ export function UserProvider({ children }) {
   }, []);
 
   const loginWithPassword = useCallback(async (email, password, options) => {
-    if (!isApiEnabled) return login({ email, name: email.split("@")[0] }, options);
+    if (!isApiEnabled) {
+      const authentication = await authenticateLocalAccount(email, password);
+      if (authentication.reason === "USER_NOT_FOUND") {
+        const error = new Error("No account exists for this email. Please create an account first.");
+        error.code = "USER_NOT_FOUND";
+        throw error;
+      }
+      if (authentication.reason === "PASSWORD_NOT_CONFIGURED") {
+        const error = new Error("This local account was created before password security was enabled. Clear local storage and create the account again.");
+        error.code = "PASSWORD_NOT_CONFIGURED";
+        throw error;
+      }
+      if (!authentication.valid) {
+        const error = new Error("Incorrect password.");
+        error.code = "INVALID_PASSWORD";
+        throw error;
+      }
+      return login(authentication.account, options);
+    }
     const nextSession = await loginWithApi(email, password);
     persistSession(nextSession, options);
     setSession(nextSession);
@@ -45,6 +64,15 @@ export function UserProvider({ children }) {
     setSession(null);
   }, []);
 
+  const updateUser = useCallback((updates) => {
+    setSession((current) => {
+      if (!current) return current;
+      const next = { ...current, ...updates };
+      persistSession(next, { remember: true });
+      return next;
+    });
+  }, []);
+
   const value = useMemo(
     () => ({
       user: session,
@@ -52,9 +80,10 @@ export function UserProvider({ children }) {
       isAuthenticated: Boolean(session),
       login,
       loginWithPassword,
+      updateUser,
       logout,
     }),
-    [login, loginWithPassword, logout, session]
+    [login, loginWithPassword, logout, session, updateUser]
   );
 
   return <UserContext.Provider value={value}>{children}</UserContext.Provider>;

@@ -43,7 +43,6 @@ export default function Vendors() {
   useEffect(() => {
     if (!isApiEnabled) return;
     let cancelled = false;
-    setLoading(true);
     listVendors()
       .then((records) => {
         if (!cancelled) setVendors(records.map(fromApiVendor));
@@ -143,8 +142,8 @@ export default function Vendors() {
       </div>
 
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-800 dark:bg-slate-900">
+        <div onMouseDown={(event) => { if (event.target === event.currentTarget) setIsModalOpen(false); }} className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 py-6 backdrop-blur-sm sm:items-center">
+          <div className="max-h-[calc(100vh-3rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
             <div className="flex items-center justify-between border-b border-slate-100 pb-4 dark:border-slate-800">
               <h3 className="text-lg font-bold text-slate-950 dark:text-white">Add New Vendor</h3>
               <button
@@ -161,7 +160,7 @@ export default function Vendors() {
                   Vendor Name
                 </label>
                 <input
-                  type="date"
+                  type="text"
                   required
                   value={name}
                   onChange={(e) => setName(e.target.value)}

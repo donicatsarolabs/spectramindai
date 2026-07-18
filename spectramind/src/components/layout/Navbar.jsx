@@ -110,6 +110,7 @@ export default function Navbar() {
     const handleClickOutside = (event) => {
       if (!navRef.current?.contains(event.target)) {
         setOpenMenu(null);
+        setMobileOpen(false);
       }
     };
 

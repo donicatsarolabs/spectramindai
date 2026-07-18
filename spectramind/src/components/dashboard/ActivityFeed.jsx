@@ -5,18 +5,18 @@ import { useCMMCActivityHistory } from "../../features/cmmc/hooks";
 import { formatCMMCActivityName } from "../../features/cmmc/services";
 import { useFrameworkWorkspace } from "../../framework/FrameworkWorkspaceContext";
 
-export default function ActivityFeed() {
+export default function ActivityFeed({ activities: suppliedActivities }) {
   const { audit } = useComplianceState();
   const { activeFramework } = useFrameworkWorkspace();
   const cmmcActivities = useCMMCActivityHistory();
   const isCMMCWorkspace = resolveFrameworkId(activeFramework?.id) === CMMC_FRAMEWORK_ID;
-  const activities = isCMMCWorkspace
+  const activities = suppliedActivities || (isCMMCWorkspace
     ? cmmcActivities.slice(0, 5).map((activity) => ({
         id: activity.id,
         name: formatCMMCActivityName(activity),
         timestamp: activity.timestamp,
       }))
-    : (audit.timeline || []).slice(0, 5);
+    : (audit.timeline || []).slice(0, 5));
 
   return (
     <div className="h-full rounded-lg border border-white/75 bg-white/62 p-6 shadow-xl shadow-slate-900/5 backdrop-blur">

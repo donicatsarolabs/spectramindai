@@ -185,6 +185,13 @@ const POLICY_TITLE_OVERRIDES = {
     // ── Policies ─────────────────────────────────────────────────────────────
     const policies = rawPolicies.map((p) => {
       const linkedControls = p.relatedControls ?? [];
+      const linkedTests = uniqueValues(
+        (mappings ?? [])
+          .filter((mapping) =>
+            (mapping.policyIds ?? []).includes(p.id) || linkedControls.includes(mapping.controlId)
+          )
+          .flatMap((mapping) => mapping.testIds ?? [])
+      );
       const overridenTitle = isSoc2 ? POLICY_TITLE_OVERRIDES[p.id] || p.title : p.title;
 
       return {
@@ -200,12 +207,13 @@ const POLICY_TITLE_OVERRIDES = {
         requiredEvidence: [`${overridenTitle} Document`, "Policy Approval", "Latest Review Record"],
         comments: "",
         linkedControls,
-        linkedTests: [],
+        linkedTests,
         linkedRisks: [],
         linkedPolicies: [],
         linkedPopulations: [],
         criteria: p.relatedControls ?? [],
         mappedControls: formatLinkedCount(linkedControls, "control"),
+        mappedTests: formatLinkedCount(linkedTests, "test"),
         guidance: p.aiSummary ?? "",
         aiRecommendation: p.aiSummary ?? "",
         updatedAt: "",
@@ -253,6 +261,10 @@ function emptyLibrary() {
 function formatLinkedCount(ids, singular) {
   if (!ids?.length) return "";
   return `${ids.length} ${singular}${ids.length === 1 ? "" : "s"}`;
+}
+
+function uniqueValues(values = []) {
+  return [...new Set(values.filter(Boolean))];
 }
 
 function categoryFromPolicyTitle(title) {

@@ -8,6 +8,9 @@ import { ComplianceStateProvider } from "./compliance/ComplianceStateContext";
 import { FrameworkWorkspaceProvider } from "./framework/FrameworkWorkspaceContext";
 import "./index.css";
 
+document.documentElement.classList.remove("dark");
+localStorage.removeItem("darkMode");
+
 ReactDOM.createRoot(
   document.getElementById("root")
 ).render(

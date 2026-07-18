@@ -315,7 +315,7 @@ function getCompletionStats(rows = []) {
     applicable: applicable.length,
     completed,
     incomplete,
-    percentage: applicable.length ? Math.round((completed / applicable.length) * 100) : 100,
+    percentage: applicable.length ? Math.round((completed / applicable.length) * 100) : 0,
   };
 }
 
@@ -335,7 +335,7 @@ function getEvidenceStats(evidenceRequirements = [], evidenceRecords = []) {
     applicable: applicable.length,
     covered: covered.length,
     missing: missingItems.length,
-    coverage: applicable.length ? Math.round((covered.length / applicable.length) * 100) : 100,
+    coverage: applicable.length ? Math.round((covered.length / applicable.length) * 100) : 0,
     missingItems,
   };
 }
@@ -351,7 +351,7 @@ function getPolicyStats(policies = []) {
     applicable: applicable.length,
     completed,
     missing,
-    percentage: applicable.length ? Math.round((completed / applicable.length) * 100) : 100,
+    percentage: applicable.length ? Math.round((completed / applicable.length) * 100) : 0,
   };
 }
 

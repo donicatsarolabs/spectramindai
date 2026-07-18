@@ -16,6 +16,7 @@ import ComplianceChart from "../components/dashboard/ComplianceChart";
 import AppShell from "../components/layout/AppShell";
 import { useComplianceState } from "../compliance/ComplianceStateContext";
 import { CMMC_FRAMEWORK_ID, resolveFrameworkId } from "../core/engines/framework-engine/frameworkRegistry";
+import { buildLocalDashboardScore } from "../dashboard/DashboardScoreService";
 import { useCMMCActivityHistory, useCMMCSPRSCalculation, useCMMCWorkflowState } from "../features/cmmc/hooks";
 import {
   buildCMMCPolicyDocumentMetrics,
@@ -31,27 +32,52 @@ import { isApiEnabled } from "../api/client";
 import { loadDashboard } from "../api/dashboard";
 
 export default function Dashboard() {
-  const { activeFramework } = useFrameworkWorkspace();
+  const { activeFramework, selectedFrameworks } = useFrameworkWorkspace();
 
-  if (!activeFramework) {
+  if (!selectedFrameworks.length) {
     return <ActiveFrameworkRequired />;
   }
 
-  return <DashboardContent key={activeFramework.id} activeFramework={activeFramework} />;
+  return <DashboardContent activeFramework={activeFramework || selectedFrameworks[0]} selectedFrameworks={selectedFrameworks} />;
 }
 
-function DashboardContent({ activeFramework }) {
+function DashboardContent({ activeFramework, selectedFrameworks }) {
   const navigate = useNavigate();
+  const { setActiveFramework } = useFrameworkWorkspace();
+  const [dashboardScope, setDashboardScope] = useState("all");
   const [apiDashboard, setApiDashboard] = useState(null);
   const [apiError, setApiError] = useState("");
+  const [loadingDashboard, setLoadingDashboard] = useState(isApiEnabled);
+  const scopedFramework = dashboardScope === "all"
+    ? null
+    : selectedFrameworks.find(framework => framework.id === dashboardScope) || null;
+  const navigationFramework = scopedFramework || activeFramework;
+  const localDashboard = useMemo(
+    () => buildLocalDashboardScore(selectedFrameworks, scopedFramework),
+    [selectedFrameworks, scopedFramework]
+  );
+  const dashboardData = isApiEnabled ? apiDashboard : localDashboard;
+
   useEffect(() => {
-    if (!isApiEnabled || activeFramework.slug === "cmmc") return;
-    loadDashboard(resolveFrameworkId(activeFramework.id) || activeFramework.id).then(setApiDashboard).catch((error) => setApiError(error.message || "Could not load dashboard"));
-  }, [activeFramework]);
+    if (!isApiEnabled) return;
+    let cancelled = false;
+    const frameworkId = scopedFramework ? resolveFrameworkId(scopedFramework.id) || scopedFramework.id : "";
+    loadDashboard(frameworkId)
+      .then(result => { if (!cancelled) setApiDashboard(result); })
+      .catch(error => { if (!cancelled) setApiError(error.message || "Could not load dashboard"); })
+      .finally(() => { if (!cancelled) setLoadingDashboard(false); });
+    return () => { cancelled = true; };
+  }, [scopedFramework, selectedFrameworks]);
+  const switchDashboardScope = framework => {
+    if (isApiEnabled) setLoadingDashboard(true);
+    setApiError("");
+    setDashboardScope(framework?.id || "all");
+    if (framework) setActiveFramework(framework.id);
+  };
   const cmmcSPRS = useCMMCSPRSCalculation();
   const cmmcActivities = useCMMCActivityHistory();
   const { workflowState, controlWorkflowFields, evidenceWorkflowFields } = useCMMCWorkflowState();
-  const isCMMCWorkspace = resolveFrameworkId(activeFramework.id) === CMMC_FRAMEWORK_ID;
+  const isCMMCWorkspace = !isApiEnabled && selectedFrameworks.length === 1 && resolveFrameworkId(navigationFramework.id) === CMMC_FRAMEWORK_ID;
   const {
     audit,
     controls,
@@ -70,20 +96,20 @@ function DashboardContent({ activeFramework }) {
     ...(implementations.risks || []),
     ...(implementations.populations || []),
   ];
-  const completedImplementations = implementationRows.filter(isComplete).length;
-  const totalImplementations = implementationRows.length;
+  const completedImplementations = dashboardData?.implementedControls ?? implementationRows.filter(isComplete).length;
+  const totalImplementations = dashboardData?.totalControls ?? implementationRows.length;
   const cmmcCompletionPercentage = clampPercent(cmmcSPRS.completionPercentage);
   const cmmcCompliancePercentage = clampPercent(cmmcSPRS.compliancePercentage ?? cmmcSPRS.completionPercentage);
   const frameworkProgress = isCMMCWorkspace
     ? cmmcCompletionPercentage
-    : apiDashboard?.progressPercent ?? (totalImplementations ? Math.round((completedImplementations / totalImplementations) * 100) : 0);
-  const auditReadiness = isCMMCWorkspace ? cmmcCompletionPercentage : apiDashboard?.progressPercent ?? Math.round(audit.readiness ?? 0);
-  const overallScore = isCMMCWorkspace ? cmmcCompliancePercentage : apiDashboard?.progressPercent ?? Math.round(audit.complianceScore ?? frameworkProgress);
-  const applicableControls = controls.filter((control) => control.applicable).length;
+    : dashboardData?.progressPercent ?? 0;
+  const auditReadiness = isCMMCWorkspace ? cmmcCompletionPercentage : dashboardData?.progressPercent ?? 0;
+  const overallScore = isCMMCWorkspace ? cmmcCompliancePercentage : dashboardData?.progressPercent ?? 0;
+  const applicableControls = dashboardData?.totalControls ?? controls.filter((control) => control.applicable).length;
   const cmmcEvidenceAttachmentStats = buildCMMCEvidenceAttachmentStats(controlWorkflowFields, cmmcSPRS.controls);
   const evidenceTotal = isCMMCWorkspace
     ? cmmcEvidenceAttachmentStats.totalAttachments
-    : apiDashboard?.evidenceTotal ?? evidence.filter((record) => !record.deletedAt).length;
+    : dashboardData?.evidenceTotal ?? evidence.filter((record) => !record.deletedAt).length;
   const missingEvidenceTotal = isCMMCWorkspace
     ? cmmcEvidenceAttachmentStats.missingControls
     : audit.pendingEvidence?.length || 0;
@@ -99,23 +125,23 @@ function DashboardContent({ activeFramework }) {
     () => buildCMMCPolicyDocumentMetrics(cmmcPolicyRows),
     [cmmcPolicyRows]
   );
-  const policiesTotal = isCMMCWorkspace ? cmmcPolicyMetrics.totalPolicies : apiDashboard?.policiesTotal ?? policies.length;
+  const policiesTotal = isCMMCWorkspace ? cmmcPolicyMetrics.totalPolicies : dashboardData?.policiesTotal ?? policies.length;
   const policiesPublished = isCMMCWorkspace
     ? cmmcPolicyMetrics.publishedPolicies
-    : apiDashboard?.policiesPublished ?? policies.filter((policy) => policy.status === "Active" || isComplete(policy)).length;
+    : dashboardData?.policiesPublished ?? policies.filter((policy) => policy.status === "Active" || isComplete(policy)).length;
   const policiesRemaining = isCMMCWorkspace
     ? cmmcPolicyMetrics.remainingPolicies
     : Math.max(policiesTotal - policiesPublished, 0);
-  const openRisks = isCMMCWorkspace ? risks.filter((risk) => risk.applicable && ["Open", "In Progress"].includes(risk.treatmentStatus || risk.status)).length : apiDashboard?.openRisks ?? risks.filter((risk) => risk.applicable && ["Open", "In Progress"].includes(risk.treatmentStatus || risk.status)).length;
+  const openRisks = isCMMCWorkspace ? risks.filter((risk) => risk.applicable && ["Open", "In Progress"].includes(risk.treatmentStatus || risk.status)).length : dashboardData?.openRisks ?? risks.filter((risk) => risk.applicable && ["Open", "In Progress"].includes(risk.treatmentStatus || risk.status)).length;
   const testsTotal = tests.length;
   const completedTests = tests.filter(isComplete).length;
-  const openTasks = isCMMCWorkspace ? tasks.filter((task) => !isComplete(task)).length : apiDashboard?.openTasks ?? tasks.filter((task) => !isComplete(task)).length;
-  const dashboardActivities = isCMMCWorkspace ? cmmcActivities : (audit.timeline || []);
+  const openTasks = isCMMCWorkspace ? tasks.filter((task) => !isComplete(task)).length : dashboardData?.openTasks ?? tasks.filter((task) => !isComplete(task)).length;
+  const dashboardActivities = dashboardData?.recentActivity || (isCMMCWorkspace ? cmmcActivities : (audit.timeline || []));
   const recentActivityCount = dashboardActivities.length;
   const recentActivityNote = recentActivityCount
     ? isCMMCWorkspace ? formatCMMCActivityName(dashboardActivities[0]) : "Latest compliance updates"
     : "No activity yet";
-  const highRisks = isCMMCWorkspace ? risks.filter((risk) => ["High", "Critical"].includes(risk.riskLevel || risk.severity) && ["Open", "In Progress"].includes(risk.treatmentStatus || risk.status)).length : apiDashboard?.highRisks ?? risks.filter((risk) => ["High", "Critical"].includes(risk.riskLevel || risk.severity) && ["Open", "In Progress"].includes(risk.treatmentStatus || risk.status)).length;
+  const highRisks = isCMMCWorkspace ? risks.filter((risk) => ["High", "Critical"].includes(risk.riskLevel || risk.severity) && ["Open", "In Progress"].includes(risk.treatmentStatus || risk.status)).length : dashboardData?.highRisks ?? risks.filter((risk) => ["High", "Critical"].includes(risk.riskLevel || risk.severity) && ["Open", "In Progress"].includes(risk.treatmentStatus || risk.status)).length;
 
   const stats = [
     ...(isCMMCWorkspace
@@ -140,7 +166,7 @@ function DashboardContent({ activeFramework }) {
           {
             label: "Framework Progress",
             value: `${frameworkProgress}%`,
-            note: `${activeFramework.name} active workspace`,
+            note: scopedFramework ? `${scopedFramework.name} only` : `${selectedFrameworks.length} selected frameworks combined`,
             icon: Building2,
             tone: "text-violet-600",
             target: { itemType: "Implementation", itemId: "framework-progress" },
@@ -222,7 +248,11 @@ function DashboardContent({ activeFramework }) {
     },
   ];
 
-  const readiness = (audit.checklist || []).slice(0, 3).map((item) => ({
+  const readiness = dashboardData?.frameworkProgress?.map(item => ({
+    label: item.name,
+    status: `${item.progressPercent}% ready`,
+    target: { itemId: item.id, itemType: "Implementation" },
+  })) || (audit.checklist || []).slice(0, 3).map((item) => ({
     label: item.relatedItemId || item.name,
     status: item.status || item.category,
     target: {
@@ -241,9 +271,10 @@ function DashboardContent({ activeFramework }) {
       : policiesTotal ? Math.round((policiesPublished / policiesTotal) * 100) : 0,
   });
   const chartDelta = chartData.length > 1 ? chartData.at(-1).score - chartData[0].score : 0;
+  const visibleStats = stats.filter(stat => !["Audit Readiness", "Framework Progress", "Completed Implementations", "Tests"].includes(stat.label));
   const navigateToCard = (stat) => {
     const target = buildCrossModuleTarget({
-      activeFramework,
+      activeFramework: navigationFramework,
       itemId: stat.target.itemId,
       itemType: stat.target.itemType,
       moduleContext: `Dashboard:${stat.label}`,
@@ -253,7 +284,7 @@ function DashboardContent({ activeFramework }) {
   };
   const navigateToStartReview = () => {
     const target = buildCrossModuleTarget({
-      activeFramework,
+      activeFramework: navigationFramework,
       itemId: "start-review",
       itemType: isCMMCWorkspace ? "Gap Wizard" : "Audit",
       moduleContext: "Dashboard:Start Review",
@@ -263,7 +294,7 @@ function DashboardContent({ activeFramework }) {
   };
   const navigateToReadinessItem = (item) => {
     const target = buildCrossModuleTarget({
-      activeFramework,
+      activeFramework: navigationFramework,
       itemId: item.target.itemId,
       itemType: item.target.itemType,
       moduleContext: "Dashboard:Readiness Queue",
@@ -294,7 +325,7 @@ function DashboardContent({ activeFramework }) {
               Dashboard
             </h1>
             <p className="mt-2 max-w-2xl text-slate-600">
-              Track audit readiness, evidence movement, vendor reviews, and risk posture.
+              View your organization as a whole or focus on one compliance framework.
             </p>
           </div>
 
@@ -312,16 +343,36 @@ function DashboardContent({ activeFramework }) {
           </div>
         </div>
 
-        <section className="overflow-hidden rounded-lg border border-white/80 bg-white/58 text-slate-900 shadow-2xl shadow-slate-900/10 backdrop-blur">
-          <div className="grid gap-6 p-6 lg:grid-cols-[1fr_340px] lg:p-8">
+        <section className="rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+          <div className="flex items-center gap-2 overflow-x-auto">
+            <ScopeButton active={dashboardScope === "all"} onClick={() => switchDashboardScope(null)}>
+              All frameworks
+            </ScopeButton>
+            {selectedFrameworks.map(framework => (
+              <ScopeButton
+                key={framework.id}
+                active={dashboardScope === framework.id}
+                onClick={() => switchDashboardScope(framework)}
+              >
+                {framework.shortName || framework.name}
+              </ScopeButton>
+            ))}
+            {loadingDashboard && <span className="ml-auto shrink-0 px-3 text-xs font-bold text-slate-400">Updating…</span>}
+          </div>
+        </section>
+
+        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white text-slate-900 shadow-sm">
+          <div className="grid gap-6 p-6 lg:grid-cols-[1fr_320px]">
             <div>
               <div className="flex items-center gap-3">
                 <div className="flex h-12 w-12 items-center justify-center rounded-lg border border-blue-600/20 bg-blue-50 text-blue-700">
                   <ShieldCheck size={26} />
                 </div>
                 <div>
-                  <p className="text-sm font-bold text-blue-700">{activeFramework.name} Audit Readiness</p>
-                  <h2 className="text-4xl font-black">{auditReadiness}% ready</h2>
+                  <p className="text-sm font-bold text-blue-700">
+                    {scopedFramework ? `${scopedFramework.name} readiness` : "Combined readiness"}
+                  </p>
+                  <h2 className="text-5xl font-black tracking-tight text-slate-950">{auditReadiness}%</h2>
                 </div>
               </div>
 
@@ -339,8 +390,8 @@ function DashboardContent({ activeFramework }) {
               </p>
             </div>
 
-            <div className="rounded-lg border border-slate-200 bg-[#fffdf8]/70 p-5">
-              <h3 className="font-black">Readiness queue</h3>
+            <div className="rounded-xl bg-slate-50 p-5">
+              <h3 className="font-black">{scopedFramework ? "Framework summary" : "Framework progress"}</h3>
               <div className="mt-4 space-y-3">
                 {readiness.map((item) => (
                   <button
@@ -364,7 +415,7 @@ function DashboardContent({ activeFramework }) {
         </section>
 
         <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {stats.map((stat) => {
+          {visibleStats.map((stat) => {
             const Icon = stat.icon;
 
             return (
@@ -372,7 +423,7 @@ function DashboardContent({ activeFramework }) {
                 type="button"
                 key={stat.label}
                 onClick={() => navigateToCard(stat)}
-                className="rounded-lg border border-white/75 bg-white/62 p-5 text-left shadow-xl shadow-slate-900/5 backdrop-blur transition hover:-translate-y-0.5 hover:bg-blue-50/40"
+                className="rounded-xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-amber-200 hover:shadow-md"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div>
@@ -398,7 +449,7 @@ function DashboardContent({ activeFramework }) {
 
         <section className="grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
           <ComplianceChart data={chartData} delta={chartDelta} />
-          <ActivityFeed />
+          <ActivityFeed activities={dashboardData?.recentActivity?.slice(0, 5).map(activity => ({ id: activity.id, name: activity.name || formatActivity(activity), timestamp: activity.createdAt || activity.timestamp }))} />
         </section>
       </div>
     </AppShell>
@@ -482,4 +533,27 @@ function buildDashboardChartData(scores) {
 
 function clampPercent(value) {
   return Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+}
+
+function ScopeButton({ active, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`shrink-0 whitespace-nowrap rounded-lg px-4 py-2.5 text-sm font-bold transition ${
+        active
+          ? "bg-slate-900 text-white shadow-sm"
+          : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function formatActivity(activity) {
+  return String(activity.action || "Compliance activity")
+    .split(".")
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }

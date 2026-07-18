@@ -1,19 +1,20 @@
 const SESSION_KEY = "spectramind:session";
 const LEGACY_GOOGLE_USER_KEY = "spectramind_google_user";
 
-export function createUserSession({ id, name, email, picture, organizationId, organizationName, role }) {
+export function createUserSession({ id, name, email, picture, organizationId, organizationName, role, onboardingComplete }) {
   const normalizedEmail = String(email || "").trim().toLowerCase();
   const displayName = String(name || normalizedEmail.split("@")[0] || "User").trim();
-  const orgName = organizationName || organizationNameFromEmail(normalizedEmail);
-  const orgId = organizationId || slugify(orgName || normalizedEmail.split("@")[1] || "anonymous-org");
+  const orgName = String(organizationName || "").trim();
+  const orgId = organizationId || (orgName ? slugify(orgName) : "");
 
   return {
     userId: id || `user:${normalizedEmail || cryptoSafeId()}`,
     name: displayName,
     email: normalizedEmail,
     organizationId: orgId,
-    organizationName: orgName || "My Organization",
-    role: role || "Admin",
+    organizationName: orgName,
+    role: normalizeRole(role),
+    onboardingComplete: onboardingComplete ?? Boolean(orgId && orgName),
     picture: picture || "",
     createdAt: new Date().toISOString(),
   };
@@ -130,22 +131,19 @@ function isValidSession(session) {
       session.userId &&
       session.name &&
       session.email &&
-      session.organizationId &&
-      session.organizationName &&
       session.role
   );
 }
 
-function organizationNameFromEmail(email) {
-  const domain = email.split("@")[1] || "";
-  const root = domain.split(".")[0] || "";
-  if (!root) return "My Organization";
+export function normalizeRole(role) {
+  const value = String(role || "User").toLowerCase();
+  if (value === "admin" || value === "owner") return "Admin";
+  if (value.includes("manager")) return "Manager";
+  return "User";
+}
 
-  return root
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
+export function canManageWorkspace(role) {
+  return ["Admin", "Manager"].includes(normalizeRole(role));
 }
 
 function slugify(value) {

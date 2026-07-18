@@ -1,7 +1,10 @@
-import { useState, useEffect } from "react";
-import { Users, Plus, Mail, Search, SlidersHorizontal, Check, Edit2, Info, X, Trash2 } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { Users, Plus, Mail, Search, SlidersHorizontal, Edit2, Info, X, Trash2, FileSpreadsheet, Download, Upload } from "lucide-react";
 import AppShell from "../components/layout/AppShell";
 import { readScopedJson, writeScopedJson } from "../auth/session";
+import { canManageWorkspace } from "../auth/session";
+import { useUser } from "../auth/UserContext";
+import { createLocalInvitations, revokeLocalInvitation, updateLocalOrganizationRole } from "../data/localAccounts";
 import {
   getEmployeeTrainingCompliance,
   loadTrainingAssignments,
@@ -12,10 +15,14 @@ import {
 import { POLICY_STATUS_KEY } from "../policies/PolicyService";
 import { isApiEnabled } from "../api/client";
 import { completeBackgroundCheck, createEmployee, deleteEmployee, listEmployees, updateEmployee } from "../api/people";
+import { useFrameworkWorkspace } from "../framework/FrameworkWorkspaceContext";
 
 const initialEmployees = [];
 
 export default function Employees() {
+  const { user } = useUser();
+  const { selectedFrameworks } = useFrameworkWorkspace();
+  const canManagePeople = canManageWorkspace(user?.role);
   const [employees, setEmployees] = useState(() => {
     try {
       return readScopedJson("spectramind:employees", initialEmployees);
@@ -27,10 +34,14 @@ export default function Employees() {
   const [activeTab, setActiveTab] = useState("Employee List");
   const [searchTerm, setSearchTerm] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
+  const filterRef = useRef(null);
   const [employeeFilter, setEmployeeFilter] = useState("all");
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importRows, setImportRows] = useState([]);
+  const [importFileName, setImportFileName] = useState("");
   const [editingEmployeeId, setEditingEmployeeId] = useState(null);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -43,6 +54,16 @@ export default function Employees() {
   const [loading, setLoading] = useState(isApiEnabled);
   const [saving, setSaving] = useState(false);
   const [apiError, setApiError] = useState("");
+  const [actionNotice, setActionNotice] = useState("");
+
+  useEffect(() => {
+    if (!filterOpen) return undefined;
+    const closeFilter = (event) => {
+      if (!filterRef.current?.contains(event.target)) setFilterOpen(false);
+    };
+    document.addEventListener("mousedown", closeFilter);
+    return () => document.removeEventListener("mousedown", closeFilter);
+  }, [filterOpen]);
 
   // Dynamic States for integration (no fake fallbacks)
   const [completionsState, setCompletionsState] = useState(() => {
@@ -117,6 +138,7 @@ export default function Employees() {
   }, [employees]);
 
   const handleToggleAccess = async (id) => {
+    if (!canManagePeople) return;
     const employee = employees.find((item) => item.id === id);
     if (!employee) return;
     try {
@@ -156,37 +178,29 @@ export default function Employees() {
 
   const getEmployeeCompliance = (emp) => {
     const trainingCompliance = getEmployeeTrainingCompliance(emp, trainingLibrary, trainingAssignments, completionsState);
-    const cyberOk = trainingCompliance.isCompliant;
-    const hipaaOk = trainingCompliance.isCompliant;
+    const trainingOk = trainingCompliance.isCompliant;
 
-    const activePolicyIds = ["POL-001", "POL-003", "POL-004", "POL-010", "POL-011", "POL-012"];
-    let completedPoliciesCount = 0;
-    activePolicyIds.forEach(pid => {
-      const pMap = acknowledgementsState[pid] || {};
-      if (pMap[emp.name] === "Completed") {
-        completedPoliciesCount++;
-      }
-    });
-    // Policy count matches default mockup logic
-    const policyOk = policyStatusState[emp.id]?.isCompliant ?? completedPoliciesCount >= 5;
+    const policyAcknowledgements = Object.values(acknowledgementsState);
+    const acknowledgedPolicies = policyAcknowledgements.filter((policyMap) => policyMap?.[emp.id] || policyMap?.[emp.name] === "Completed").length;
+    const policyOk = policyStatusState[emp.id]?.isCompliant ?? (policyAcknowledgements.length > 0 && acknowledgedPolicies === policyAcknowledgements.length);
 
     const bgOk = bgChecksState[emp.name] === "Completed";
 
-    const satisfiedCount = (trainingCompliance.isCompliant ? 2 : 0) + (policyOk ? 1 : 0) + (bgOk ? 1 : 0);
-    const isCompliant = satisfiedCount === 4;
+    const satisfiedCount = (trainingOk ? 1 : 0) + (policyOk ? 1 : 0) + (bgOk ? 1 : 0);
+    const isCompliant = satisfiedCount === 3;
 
     return {
-      cyberOk,
-      hipaaOk,
+      trainingOk,
       policyOk,
       bgOk,
       satisfiedCount,
       isCompliant,
-      statusLabel: isCompliant ? "COMPLIANT 4/4" : `NON-COMPLIANT ${satisfiedCount}/4`
+      statusLabel: isCompliant ? "COMPLIANT 3/3" : `NON-COMPLIANT ${satisfiedCount}/3`
     };
   };
 
   const handleOpenAddModal = () => {
+    if (!canManagePeople) return;
     setEditingEmployeeId(null);
     setName("");
     setEmail("");
@@ -199,7 +213,64 @@ export default function Employees() {
     setIsModalOpen(true);
   };
 
+  const handleExcelFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setApiError(""); setImportFileName(file.name);
+    try {
+      const { default: readXlsxFile } = await import("read-excel-file/browser");
+      const matrix = await readXlsxFile(file, { sheet: "Employees" }).catch(() => readXlsxFile(file));
+      const [headers = [], ...bodyRows] = matrix;
+      const data = bodyRows.map((values) => Object.fromEntries(headers.map((header, index) => [String(header || "").trim(), values[index] ?? ""])));
+      const existingEmails = new Set(employees.map((employee) => employee.email.toLowerCase()));
+      const fileEmails = new Set();
+      setImportRows(data.filter((row) => Object.values(row).some(Boolean)).map((row, index) => normalizeImportRow(row, index + 2, existingEmails, fileEmails)));
+    } catch (error) {
+      setImportRows([]); setApiError(error.message || "Could not read this Excel file.");
+    }
+    event.target.value = "";
+  };
+
+  const handleImportEmployees = async () => {
+    const validRows = importRows.filter((row) => !row.errors.length);
+    if (!validRows.length) return;
+    setSaving(true); setApiError("");
+    try {
+      const added = [];
+      for (const row of validRows) {
+        const input = toEmployeeInput(row.employee);
+        added.push(isApiEnabled ? fromApiEmployee(await createEmployee(input)) : { id: `${Date.now()}-${added.length}`, ...fromApiEmployee(input), employeeStatus: "Active" });
+      }
+      setEmployees((current) => [...current, ...added]);
+      setImportRows([]); setImportFileName(""); setIsImportModalOpen(false);
+    } catch (error) { setApiError(error.message || "Could not import employees."); }
+    finally { setSaving(false); }
+  };
+
+  const handleInviteEmployee = (employee) => {
+    if (!canManagePeople) return;
+    try {
+      createLocalInvitations({ emails: [employee.email], role: employee.role, organizationId: user.organizationId, organizationName: user.organizationName, invitedBy: user.email });
+      setEmployees((current) => current.map((item) => item.id === employee.id ? { ...item, employeeStatus: "Invited", tags: [...new Set([...(item.tags || []), "Invited"])] } : item));
+      setActionNotice(`Invitation sent internally to ${employee.email}.`);
+    } catch (error) { setApiError(error.message || "Could not prepare this invitation."); }
+  };
+
+  const handleRevokeInvitation = (employee) => {
+    if (!canManagePeople) return;
+    revokeLocalInvitation({ email: employee.email, organizationId: user.organizationId });
+    setEmployees((current) => current.map((item) => item.id === employee.id ? { ...item, employeeStatus: "Active", tags: (item.tags || []).filter((tag) => tag !== "Invited") } : item));
+    setActionNotice(`Invitation removed for ${employee.email}.`);
+  };
+
+  const canRemoveEmployee = (employee) => {
+    if (!canManagePeople) return false;
+    if (user.role === "Admin") return employee.email.toLowerCase() !== user.email.toLowerCase();
+    return employee.role === "User";
+  };
+
   const handleOpenEditModal = (emp) => {
+    if (!canManagePeople) return;
     setEditingEmployeeId(emp.id);
     setName(emp.name);
     setEmail(emp.email);
@@ -213,6 +284,8 @@ export default function Employees() {
   };
 
   const handleDeleteEmployee = async (id) => {
+    const employee = employees.find((item) => item.id === id);
+    if (!employee || !canRemoveEmployee(employee)) return;
     try {
       if (isApiEnabled) await deleteEmployee(id);
       setEmployees((current) => current.filter((emp) => emp.id !== id));
@@ -223,13 +296,20 @@ export default function Employees() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!name.trim() || !email.trim()) return;
+    const normalizedEmail = email.trim().toLowerCase();
+    const duplicate = employees.find((employee) => employee.email.toLowerCase() === normalizedEmail && employee.id !== editingEmployeeId);
+    if (duplicate) {
+      setApiError("An employee with this email already exists. Edit the existing employee or send them an invitation.");
+      return;
+    }
     setSaving(true); setApiError("");
-    const input = { name: name.trim(), email: email.trim(), jobRole: role, hasAccess, startDate: dateToIso(startDate), endDate: dateToIso(endDate), employmentType: type, tags: tagsInput.split(",").map((t) => t.trim()).filter(Boolean) };
+    const input = { name: name.trim(), email: normalizedEmail, jobRole: role, hasAccess, startDate: dateToIso(startDate), endDate: dateToIso(endDate), employmentType: type, tags: tagsInput.split(",").map((t) => t.trim()).filter(Boolean) };
     try {
       if (editingEmployeeId) {
         const current = employees.find((item) => item.id === editingEmployeeId);
         const updated = isApiEnabled ? fromApiEmployee(await updateEmployee(editingEmployeeId, current.version, input)) : { ...current, ...fromApiEmployee(input) };
         setEmployees((items) => items.map((item) => item.id === editingEmployeeId ? updated : item));
+        if (!isApiEnabled) updateLocalOrganizationRole({ email: updated.email, organizationId: user.organizationId, role: updated.role });
       } else {
         const newEmp = isApiEnabled ? fromApiEmployee(await createEmployee(input)) : { id: Date.now(), ...fromApiEmployee(input), employeeStatus: "Active" };
         setEmployees((items) => [...items, newEmp]);
@@ -252,8 +332,8 @@ export default function Employees() {
 
   const employeeMatchesFilter = (emp) => {
     const compliance = getEmployeeCompliance(emp);
-    if (employeeFilter === "fully-compliant") return compliance.cyberOk && compliance.hipaaOk && compliance.policyOk && compliance.bgOk;
-    if (employeeFilter === "training") return compliance.cyberOk && compliance.hipaaOk;
+    if (employeeFilter === "fully-compliant") return compliance.trainingOk && compliance.policyOk && compliance.bgOk;
+    if (employeeFilter === "training") return compliance.trainingOk;
     if (employeeFilter === "policy") return compliance.policyOk;
     if (employeeFilter === "background") return compliance.bgOk;
     if (employeeFilter === "portal") return emp.hasAccess;
@@ -266,14 +346,14 @@ export default function Employees() {
       emp.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       emp.role.toLowerCase().includes(searchTerm.toLowerCase())
   ).filter(employeeMatchesFilter);
-  const soc2TrainingId = trainingLibrary.find((training) => training.relatedFrameworks?.includes("SOC 2"))?.id || "soc2-security-awareness";
-  const hipaaTrainingId = trainingLibrary.find((training) => training.relatedFrameworks?.includes("HIPAA"))?.id || "hipaa-privacy";
+  const selectedFrameworkNames = new Set(selectedFrameworks.map((framework) => framework.name));
+  const selectedTrainingId = trainingLibrary.find((training) => training.relatedFrameworks?.some((framework) => selectedFrameworkNames.has(framework)))?.id || trainingLibrary[0]?.id;
 
   const totalEmps = employees.length;
 
   const trainingCompliantCount = employees.filter(e => {
     const comp = getEmployeeCompliance(e);
-    return comp.cyberOk && comp.hipaaOk;
+    return comp.trainingOk;
   }).length;
 
   const policyCompliantCount = employees.filter(e => {
@@ -300,6 +380,7 @@ export default function Employees() {
     <AppShell>
       <div className="space-y-6">
         {apiError && <p role="alert" className="rounded-lg bg-rose-50 px-4 py-3 font-semibold text-rose-700">{apiError}</p>}
+        {actionNotice && <p role="status" className="rounded-lg bg-emerald-50 px-4 py-3 font-semibold text-emerald-700">{actionNotice}</p>}
         {loading && <p className="rounded-lg border border-slate-200 bg-white p-4 text-slate-500">Loading employees...</p>}
         {/* Header Section */}
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -322,14 +403,16 @@ export default function Employees() {
           <div className="flex shrink-0 items-center gap-2 mt-4 lg:mt-0">
             <button
               onClick={handleOpenAddModal}
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50"
+              disabled={!canManagePeople}
+              title={!canManagePeople ? "Only an Admin or Manager can add employees" : undefined}
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Plus size={16} />
               Add Employee
             </button>
-            <button className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50">
-              <Mail size={16} />
-              Send Invitations
+            <button onClick={() => canManagePeople && setIsImportModalOpen(true)} disabled={!canManagePeople} title={!canManagePeople ? "Only an Admin or Manager can import employees" : undefined} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+              <FileSpreadsheet size={16} />
+              Import Excel
             </button>
           </div>
         </div>
@@ -412,65 +495,25 @@ export default function Employees() {
                 </button>
               </h2>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                {/* SOC 2 card */}
-                <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="font-black text-slate-900">SOC 2</h3>
-                      <p className="text-xs font-semibold text-slate-500">{fullyCompliantCount} of {totalEmps} compliant</p>
+              {selectedFrameworks.length ? (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {selectedFrameworks.map((framework) => (
+                    <div key={framework.id} className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+                      <div className="flex items-start justify-between">
+                        <div><h3 className="font-black text-slate-900">{framework.name}</h3><p className="text-xs font-semibold text-slate-500">{fullyCompliantCount} of {totalEmps} compliant</p></div>
+                        <span className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-black ${fullyCompliantPercent === 100 ? "bg-blue-50 text-blue-700" : "bg-rose-50 text-rose-700"}`}>{fullyCompliantPercent}%</span>
+                      </div>
+                      <div className="mt-4 space-y-3 text-sm">
+                        <div className="flex items-center justify-between"><span className="font-semibold text-slate-600">Training</span><span className="font-black text-blue-600">{trainingPercent}%</span></div>
+                        <div className="flex items-center justify-between"><span className="font-semibold text-slate-600">Policy</span><span className="font-black text-slate-900">{policyPercent}%</span></div>
+                        <div className="flex items-center justify-between"><span className="font-semibold text-slate-600">Background Check</span><span className="font-black text-slate-900">{bgPercent}%</span></div>
+                      </div>
                     </div>
-                    <span className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-black ${
-                      fullyCompliantPercent === 100 ? "bg-blue-50 text-blue-700" : "bg-rose-50 text-rose-700"
-                    }`}>
-                      {fullyCompliantPercent}%
-                    </span>
-                  </div>
-                  <div className="mt-4 space-y-3 text-sm">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-600 font-semibold">Training</span>
-                      <span className="font-black text-blue-600">{trainingPercent}%</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-600 font-semibold">Policy</span>
-                      <span className="font-black text-blue-650">{policyPercent}%</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-600 font-semibold">Background Check</span>
-                      <span className="font-black text-blue-650">{bgPercent}%</span>
-                    </div>
-                  </div>
+                  ))}
                 </div>
-
-                {/* HIPAA card */}
-                <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="font-black text-slate-900">HIPAA</h3>
-                      <p className="text-xs font-semibold text-slate-500">{fullyCompliantCount} of {totalEmps} compliant</p>
-                    </div>
-                    <span className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-black ${
-                      fullyCompliantPercent === 100 ? "bg-blue-50 text-blue-700" : "bg-rose-50 text-rose-700"
-                    }`}>
-                      {fullyCompliantPercent}%
-                    </span>
-                  </div>
-                  <div className="mt-4 space-y-3 text-sm">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-600 font-semibold">Training</span>
-                      <span className="font-black text-blue-600">{trainingPercent}%</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-600 font-semibold">Policy</span>
-                      <span className="font-black text-blue-650">{policyPercent}%</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-600 font-semibold">Background Check</span>
-                      <span className="font-black text-blue-650">{bgPercent}%</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              ) : (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-sm font-semibold text-slate-500">No frameworks selected for this organization.</div>
+              )}
             </div>
 
             {/* Search/Filters row */}
@@ -485,7 +528,7 @@ export default function Employees() {
                   className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-10 pr-4 text-sm text-slate-800 outline-none focus:border-blue-500 dark:border-slate-850 dark:bg-slate-950 dark:text-white"
                 />
               </div>
-              <div className="relative">
+              <div className="relative" ref={filterRef}>
                 <button
                   type="button"
                   onClick={() => setFilterOpen((current) => !current)}
@@ -549,26 +592,12 @@ export default function Employees() {
                                 {comp.statusLabel}
                               </span>
                               <div className="flex gap-1">
-                                <button
+                                {selectedTrainingId && <button
                                   type="button"
-                                  title="Toggle Cybersecurity Training Completion"
-                                  onClick={() => handleToggleTraining(soc2TrainingId, emp)}
-                                  className={`h-4 px-1 text-[9px] font-black rounded border transition ${
-                                    comp.cyberOk ? "bg-blue-50 text-blue-700 border-blue-200" : "bg-slate-50 text-slate-400 border-slate-200"
-                                  }`}
-                                >
-                                  Cyber
-                                </button>
-                                <button
-                                  type="button"
-                                  title="Toggle HIPAA Training Completion"
-                                  onClick={() => handleToggleTraining(hipaaTrainingId, emp)}
-                                  className={`h-4 px-1 text-[9px] font-black rounded border transition ${
-                                    comp.hipaaOk ? "bg-purple-50 text-purple-700 border-purple-200" : "bg-slate-50 text-slate-400 border-slate-200"
-                                  }`}
-                                >
-                                  HIPAA
-                                </button>
+                                  title="Toggle training completion"
+                                  onClick={() => handleToggleTraining(selectedTrainingId, emp)}
+                                  className={`h-4 rounded border px-1 text-[9px] font-black transition ${comp.trainingOk ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-slate-50 text-slate-400"}`}
+                                >Training</button>}
                                 <button
                                   type="button"
                                   title="Toggle Background Check Status"
@@ -636,6 +665,16 @@ export default function Employees() {
                         <div className="flex items-center gap-1">
                           <button
                             type="button"
+                            title={emp.employeeStatus === "Invited" ? "Remove pending invitation" : "Invite to workspace"}
+                            disabled={!canManagePeople}
+                            onClick={() => emp.employeeStatus === "Invited" ? handleRevokeInvitation(emp) : handleInviteEmployee(emp)}
+                            className={`inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-black disabled:cursor-not-allowed disabled:text-slate-400 ${emp.employeeStatus === "Invited" ? "text-rose-700 hover:bg-rose-50" : "text-blue-700 hover:bg-blue-50"}`}
+                          >
+                            <Mail size={14} />
+                            {emp.employeeStatus === "Invited" ? "Remove invite" : "Invite"}
+                          </button>
+                          <button
+                            type="button"
                             title="Edit Employee"
                             onClick={() => handleOpenEditModal(emp)}
                             className="rounded-lg p-1.5 text-slate-450 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800"
@@ -645,8 +684,9 @@ export default function Employees() {
                           <button
                             type="button"
                             title="Delete Employee"
+                            disabled={!canRemoveEmployee(emp)}
                             onClick={() => handleDeleteEmployee(emp.id)}
-                            className="rounded-lg p-1.5 text-slate-450 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/30"
+                            className="rounded-lg p-1.5 text-slate-450 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-rose-950/30"
                           >
                             <Trash2 size={15} />
                           </button>
@@ -667,8 +707,8 @@ export default function Employees() {
 
       {/* Add Employee Modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-800 dark:bg-slate-900">
+        <div onMouseDown={(event) => { if (event.target === event.currentTarget) setIsModalOpen(false); }} className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 py-6 backdrop-blur-sm sm:items-center">
+          <div className="max-h-[calc(100vh-3rem)] w-full max-w-lg overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900">
             <div className="flex items-center justify-between border-b border-slate-100 pb-4 dark:border-slate-800">
               <h3 className="text-lg font-bold text-slate-950 dark:text-white">
                 {editingEmployeeId ? "Edit Employee" : "Add New Employee"}
@@ -682,6 +722,11 @@ export default function Employees() {
             </div>
 
             <form onSubmit={handleSubmit} className="mt-4 space-y-4">
+              {apiError && (
+                <p role="alert" className="rounded-lg bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700">
+                  {apiError}
+                </p>
+              )}
               <div>
                 <label className="block text-sm font-semibold text-slate-700 dark:text-slate-350">
                   Full Name
@@ -767,11 +812,10 @@ export default function Employees() {
                     Start Date
                   </label>
                   <input
-                    type="text"
+                    type="date"
                     value={startDate}
                     onChange={(e) => setStartDate(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 shadow-sm outline-none focus:border-blue-500 dark:border-slate-880 dark:bg-slate-955 dark:text-white"
-                    placeholder="e.g. 5/12/2026"
                   />
                 </div>
 
@@ -780,11 +824,10 @@ export default function Employees() {
                     End Date
                   </label>
                   <input
-                    type="text"
+                    type="date"
                     value={endDate}
                     onChange={(e) => setEndDate(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 shadow-sm outline-none focus:border-blue-500 dark:border-slate-880 dark:bg-slate-955 dark:text-white"
-                    placeholder="e.g. 5/12/2027"
                   />
                 </div>
               </div>
@@ -812,12 +855,25 @@ export default function Employees() {
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+                  disabled={saving}
+                  className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Save Employee
+                  {saving ? "Saving..." : "Save Employee"}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {isImportModalOpen && (
+        <div onMouseDown={(event) => { if (event.target === event.currentTarget) setIsImportModalOpen(false); }} className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/50 p-4 py-6 backdrop-blur-sm sm:items-center">
+          <div className="max-h-[calc(100vh-3rem)] w-full max-w-5xl overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4"><div><h3 className="text-xl font-black text-slate-950">Import employees from Excel</h3><p className="mt-1 text-sm text-slate-500">Download the template, keep its headers unchanged, then upload the completed .xlsx file.</p></div><button type="button" onClick={() => setIsImportModalOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X size={18}/></button></div>
+            <div className="mt-5 grid gap-4 rounded-xl border border-blue-100 bg-blue-50/60 p-4 md:grid-cols-[1fr_auto]"><div><p className="font-black text-blue-950">Required format</p><p className="mt-1 text-sm leading-6 text-blue-900">Required: Full Name and Email. Optional: System Role, Employee Type, Portal Access, Start Date, End Date, and Tags.</p></div><a href="/templates/employee-import-template.xlsx" download className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 bg-white px-4 py-2.5 font-black text-blue-700"><Download size={17}/>Download template</a></div>
+            <label className="mt-5 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 px-5 py-8 text-center hover:border-blue-400 hover:bg-blue-50/30"><Upload size={28} className="text-blue-700"/><span className="mt-3 font-black text-slate-800">Choose completed Excel file</span><span className="mt-1 text-sm text-slate-500">.xlsx or .xls</span><input type="file" accept=".xlsx,.xls" onChange={handleExcelFile} className="sr-only"/></label>
+            {importFileName && <p className="mt-3 text-sm font-semibold text-slate-600">Selected: {importFileName}</p>}
+            {importRows.length > 0 && <div className="mt-5"><div className="mb-3 flex items-center justify-between"><h4 className="font-black text-slate-900">Import preview</h4><p className="text-sm font-semibold text-slate-500">{importRows.filter((row) => !row.errors.length).length} valid · {importRows.filter((row) => row.errors.length).length} need attention</p></div><div className="max-h-72 overflow-auto rounded-lg border border-slate-200"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-slate-100 text-xs uppercase text-slate-500"><tr><th className="px-3 py-2">Row</th><th className="px-3 py-2">Name</th><th className="px-3 py-2">Email</th><th className="px-3 py-2">Role</th><th className="px-3 py-2">Type</th><th className="px-3 py-2">Validation</th></tr></thead><tbody>{importRows.map((row) => <tr key={row.rowNumber} className="border-t border-slate-100"><td className="px-3 py-2">{row.rowNumber}</td><td className="px-3 py-2 font-semibold">{row.employee.name}</td><td className="px-3 py-2">{row.employee.email}</td><td className="px-3 py-2">{row.employee.role}</td><td className="px-3 py-2">{row.employee.type}</td><td className={`px-3 py-2 font-semibold ${row.errors.length ? "text-rose-700" : "text-emerald-700"}`}>{row.errors.length ? row.errors.join("; ") : "Ready"}</td></tr>)}</tbody></table></div></div>}
+            <div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setIsImportModalOpen(false)} className="rounded-lg border border-slate-300 px-4 py-2 font-semibold">Cancel</button><button type="button" onClick={handleImportEmployees} disabled={saving || !importRows.some((row) => !row.errors.length)} className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"><FileSpreadsheet size={16}/>{saving ? "Importing..." : "Add valid employees"}</button></div>
           </div>
         </div>
       )}
@@ -826,12 +882,68 @@ export default function Employees() {
 }
 
 function dateToIso(value) {
-  return value && value !== "-" ? new Date(`${value}T00:00:00Z`).toISOString() : null;
+  if (!value || value === "-") return null;
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00Z`) : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error("Enter a valid start and end date.");
+  return date.toISOString();
+}
+
+function normalizeImportRow(source, rowNumber, existingEmails, fileEmails) {
+  const value = (header) => source[header] ?? "";
+  const email = String(value("Email")).trim().toLowerCase();
+  const role = canonicalValue(value("System Role"), ["User", "Manager", "Admin"], "User");
+  const type = canonicalValue(value("Employee Type"), ["Full-Time", "Part-Time", "Contractor"], "Full-Time");
+  const portalValue = String(value("Portal Access") || "Yes").trim().toLowerCase();
+  const employee = {
+    name: String(value("Full Name")).trim(),
+    email,
+    role,
+    type,
+    hasAccess: !["no", "false", "0"].includes(portalValue),
+    startDate: normalizeExcelDate(value("Start Date")),
+    endDate: normalizeExcelDate(value("End Date")),
+    tags: String(value("Tags") || "All Staff").split(",").map((tag) => tag.trim()).filter(Boolean),
+  };
+  const errors = [];
+  if (!employee.name) errors.push("Full Name is required");
+  if (!/^\S+@\S+\.\S+$/.test(email)) errors.push("Valid Email is required");
+  if (existingEmails.has(email)) errors.push("Email already exists");
+  if (fileEmails.has(email)) errors.push("Duplicate email in file");
+  if (email) fileEmails.add(email);
+  if (!role) errors.push("Role must be User, Manager, or Admin");
+  if (!type) errors.push("Type must be Full-Time, Part-Time, or Contractor");
+  if (value("Start Date") && !employee.startDate) errors.push("Invalid Start Date");
+  if (value("End Date") && !employee.endDate) errors.push("Invalid End Date");
+  return { rowNumber, employee: { ...employee, role: role || String(value("System Role")), type: type || String(value("Employee Type")) }, errors };
+}
+
+function canonicalValue(value, choices, fallback) {
+  if (!String(value).trim()) return fallback;
+  return choices.find((choice) => choice.toLowerCase() === String(value).trim().toLowerCase()) || "";
+}
+
+function normalizeExcelDate(value) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+}
+
+function toEmployeeInput(employee) {
+  return {
+    name: employee.name,
+    email: employee.email,
+    jobRole: employee.role,
+    employmentType: employee.type,
+    hasAccess: employee.hasAccess,
+    startDate: dateToIso(employee.startDate),
+    endDate: dateToIso(employee.endDate),
+    tags: employee.tags,
+  };
 }
 
 function fromApiEmployee(employee) {
   const date = (value) => value ? new Date(value).toISOString().slice(0, 10) : "-";
-  return { ...employee, role: employee.jobRole || employee.role || "User", type: employee.employmentType || employee.type || "Full-Time", startDate: date(employee.startDate), endDate: date(employee.endDate), tags: employee.tags || [] };
+  return { ...employee, role: employee.jobRole || employee.role || "User", type: employee.employmentType || employee.type || "Full-Time", startDate: date(employee.startDate), endDate: date(employee.endDate), tags: employee.tags || [], employeeStatus: employee.employeeStatus || "Active" };
 }
 
 function EmployeeFilterOption({ active, onClick, children }) {

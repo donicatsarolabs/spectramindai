@@ -18,6 +18,12 @@ enum MembershipRole {
   READ_ONLY
 }
 
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+}
+
 enum ImplementationStatus {
   NOT_STARTED
   IN_PROGRESS
@@ -105,12 +111,20 @@ enum FindingSeverity {
   CRITICAL
 }
 
+enum TrustRequestStatus {
+  PENDING
+  APPROVED
+  DENIED
+}
+
 model User {
   id           String                   @id @default(uuid()) @db.Uuid
   email        String                   @unique
   name         String
   passwordHash String
+  requestedRole MembershipRole           @default(EMPLOYEE)
   memberships OrganizationMembership[]
+  acceptedInvitations OrganizationInvitation[] @relation("AcceptedInvitation")
   createdAt    DateTime                 @default(now())
   updatedAt    DateTime                 @updatedAt
 }
@@ -119,7 +133,9 @@ model Organization {
   id           String                   @id @default(uuid()) @db.Uuid
   name         String
   slug         String                   @unique
+  contactEmail String?
   memberships  OrganizationMembership[]
+  invitations  OrganizationInvitation[]
   frameworks   OrganizationFramework[]
   controls     ControlImplementation[]
   activity     ActivityEvent[]
@@ -133,8 +149,48 @@ model Organization {
   vendors      Vendor[]
   audits       Audit[]
   workspaceItems WorkspaceItemState[]
+  trustCenterProfile TrustCenterProfile?
+  trustAccessRequests TrustAccessRequest[]
   createdAt    DateTime                 @default(now())
   updatedAt    DateTime                 @updatedAt
+}
+
+model TrustCenterProfile {
+  id                  String       @id @default(uuid()) @db.Uuid
+  organizationId      String       @unique @db.Uuid
+  published           Boolean      @default(false)
+  headline            String
+  description         String
+  securityEmail       String?
+  website             String?
+  showReadiness       Boolean      @default(true)
+  showFrameworks      Boolean      @default(true)
+  showPolicies        Boolean      @default(true)
+  allowAccessRequests Boolean      @default(true)
+  updatedBy           String       @db.Uuid
+  version             Int          @default(1)
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+}
+
+model TrustAccessRequest {
+  id             String             @id @default(uuid()) @db.Uuid
+  organizationId String             @db.Uuid
+  name           String
+  email          String
+  company        String
+  resource       String
+  reason         String?
+  status         TrustRequestStatus @default(PENDING)
+  requestedBy    String             @db.Uuid
+  reviewedBy     String?            @db.Uuid
+  reviewedAt     DateTime?
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, requestedBy])
 }
 
 model WorkspaceItemState {
@@ -243,6 +299,8 @@ model Employee {
   organizationId String       @db.Uuid
   name           String
   email          String
+  membershipId   String?      @unique @db.Uuid
+  accessRole     MembershipRole @default(EMPLOYEE)
   jobRole        String?
   employmentType String?
   hasAccess      Boolean      @default(true)
@@ -254,6 +312,7 @@ model Employee {
   updatedBy      String       @db.Uuid
   version        Int          @default(1)
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  membership     OrganizationMembership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
   policyAssignments PolicyAssignment[]
   trainingAssignments TrainingAssignment[]
   createdAt      DateTime     @default(now())
@@ -342,11 +401,32 @@ model OrganizationMembership {
   role           MembershipRole @default(EMPLOYEE)
   organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employee       Employee?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
   @@unique([organizationId, userId])
-  @@index([userId])
+  @@unique([userId])
+}
+
+model OrganizationInvitation {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @db.Uuid
+  email          String
+  role           MembershipRole   @default(EMPLOYEE)
+  status         InvitationStatus @default(PENDING)
+  token          String           @unique @default(uuid()) @db.Uuid
+  invitedBy      String           @db.Uuid
+  acceptedById   String?          @db.Uuid
+  acceptedAt     DateTime?
+  revokedAt      DateTime?
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  acceptedBy     User?            @relation("AcceptedInvitation", fields: [acceptedById], references: [id], onDelete: SetNull)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@unique([organizationId, email])
+  @@index([email, status])
 }
 
 model Framework {

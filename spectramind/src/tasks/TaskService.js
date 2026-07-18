@@ -23,8 +23,7 @@ export function mergeTaskState(tasks = [], taskState = {}) {
       generatedStatus: task.status,
       status: taskState[task.id]?.status || task.status || "Open",
       owner: taskState[task.id]?.owner || task.owner || "Unassigned",
-    }))
-    .filter((task) => task.status !== "Completed");
+    }));
 }
 
 export function updateTaskState(taskState, taskId, updates) {
