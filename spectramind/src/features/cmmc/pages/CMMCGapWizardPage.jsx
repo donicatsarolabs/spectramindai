@@ -6,24 +6,32 @@ import {
   getFrameworkLibrary,
 } from "../../../core/engines/framework-engine/frameworkRegistry";
 import { CMMCImplementationLayout } from "../components";
-import { CMMC_CONTROL_WORKFLOW_STATUS_OPTIONS, useCMMCWorkflowState } from "../hooks";
+import { CMMC_CONTROL_WORKFLOW_STATUS_OPTIONS, useCMMCSPRSCalculation, useCMMCWorkflowState } from "../hooks";
 
 const cmmcLibrary = getFrameworkLibrary(CMMC_FRAMEWORK_ID) || emptyFrameworkLibrary();
 const baseGapItems = buildGapItems(cmmcLibrary);
 
 export default function CMMCGapWizardPage() {
   const { controlWorkflowFields, updateControlWorkflowStatus } = useCMMCWorkflowState();
+  const sprsMetrics = useCMMCSPRSCalculation();
   const [reviewStarted, setReviewStarted] = useState(false);
   const [activeGapIndex, setActiveGapIndex] = useState(0);
-  const gapItems = useMemo(
-    () => applyGapWorkflowFields(baseGapItems, controlWorkflowFields).filter((gap) => !isCompletedStatus(gap.evidenceStatus)),
-    [controlWorkflowFields]
+  const sprsStatusByControl = useMemo(
+    () => new Map((sprsMetrics.controls || []).map((control) => [control.controlId, control.displayStatus || displayStatus(control.status)])),
+    [sprsMetrics.controls]
   );
-  const gapMetrics = useMemo(() => buildGapMetrics(cmmcLibrary, gapItems), [gapItems]);
+  const gapItems = useMemo(
+    () => applyGapWorkflowFields(baseGapItems, controlWorkflowFields, sprsStatusByControl).filter((gap) => !isCompletedStatus(gap.evidenceStatus)),
+    [controlWorkflowFields, sprsStatusByControl]
+  );
+  const gapMetrics = useMemo(() => buildGapMetrics(cmmcLibrary, gapItems, sprsMetrics), [gapItems, sprsMetrics]);
   const activeGap = gapItems[activeGapIndex] || emptyGapItem();
 
   useEffect(() => {
-    setActiveGapIndex((current) => Math.min(current, Math.max(gapItems.length - 1, 0)));
+    const frameId = requestAnimationFrame(() => {
+      setActiveGapIndex((current) => Math.min(current, Math.max(gapItems.length - 1, 0)));
+    });
+    return () => cancelAnimationFrame(frameId);
   }, [gapItems.length]);
 
   return (
@@ -62,8 +70,8 @@ export default function CMMCGapWizardPage() {
 
           <div className="grid border-b border-slate-100 text-center sm:grid-cols-3">
             <ProgressMetric value={gapMetrics.openGaps} label="Open Gaps" />
-            <ProgressMetric value="44" label="Critical (5-PT)" />
-            <ProgressMetric value="-203" label="Current SPRS" />
+            <ProgressMetric value={gapMetrics.criticalGaps} label="Critical (5-PT)" />
+            <ProgressMetric value={gapMetrics.currentSPRS} label="Current SPRS" />
           </div>
 
           <div className="space-y-5 px-7 py-6 text-[13px] font-semibold leading-6 text-slate-600">
@@ -71,7 +79,7 @@ export default function CMMCGapWizardPage() {
               The wizard will show you each incomplete control starting with the highest-value ones. For each control you will see what it actually means in plain English, what "done" looks like for a small business, and specific first steps to take.
             </p>
             <p>
-              As you work through gaps and mark controls complete in the <strong className="text-slate-900">Organization</strong> tab, your SPRS score updates in real time. You're currently at risk of losing <strong className="text-slate-900">313 SPRS points</strong> from the maximum score of 110.
+              As you work through gaps and mark controls complete in the <strong className="text-slate-900">Organization</strong> tab, your SPRS score updates in real time. You're currently at risk of losing <strong className="text-slate-900">{gapMetrics.pointsAtRisk} SPRS points</strong> from the maximum score of {gapMetrics.maximumSPRS}.
             </p>
 
             <button
@@ -181,10 +189,10 @@ function ProgressMetric({ value, label }) {
   );
 }
 
-function applyGapWorkflowFields(items, controlWorkflowFields = {}) {
+function applyGapWorkflowFields(items, controlWorkflowFields = {}, sprsStatusByControl = new Map()) {
   return items.map((item) => ({
     ...item,
-    evidenceStatus: workflowFieldValue(controlWorkflowFields[item.workflowKey], "status", item.evidenceStatus),
+    evidenceStatus: workflowFieldValue(controlWorkflowFields[item.workflowKey], "status", sprsStatusByControl.get(item.workflowKey) || item.evidenceStatus),
   }));
 }
 
@@ -229,12 +237,32 @@ function buildGapItems(library) {
   });
 }
 
-function buildGapMetrics(library, items) {
+function buildGapMetrics(library, items, sprsMetrics = {}) {
   const hasMappings = Boolean((library.mappings || []).length);
 
   return {
-    openGaps: hasMappings ? items.length : library.framework?.controlCount || 0,
+    openGaps: Number(sprsMetrics.openGapCount) || (hasMappings ? items.length : library.framework?.controlCount || 0),
+    criticalGaps: Number(sprsMetrics.criticalGapCount) || 0,
+    currentSPRS: formatNumber(sprsMetrics.currentSPRSScore),
+    pointsAtRisk: formatNumber(sprsMetrics.pointsAtRisk),
+    maximumSPRS: formatNumber(sprsMetrics.scoreRange?.maximum ?? 110),
   };
+}
+
+function displayStatus(status) {
+  return {
+    IMPLEMENTED: "Completed",
+    NOT_APPLICABLE: "Not Applicable",
+    PARTIALLY_IMPLEMENTED: "Partially Implemented",
+    IN_PROGRESS: "In Progress",
+    PLANNED: "Planned",
+    NOT_STARTED: "Not Started",
+  }[status] || "";
+}
+
+function formatNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? String(Math.round(number)) : "0";
 }
 
 function parseControlDomain(controlFamily, controlId) {

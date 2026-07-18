@@ -8,6 +8,7 @@ import { CMMCImplementationLayout, useCMMCWorkspaceFilters } from "../components
 import {
   CMMC_CONTROL_WORKFLOW_STATUS_OPTIONS,
   getCMMCOrganizationProfileSearchText,
+  useCMMCSPRSCalculation,
   useCMMCWorkflowState,
 } from "../hooks";
 
@@ -31,6 +32,7 @@ export default function CMMCOrganizationPage() {
 
 function CMMCOrganizationContent({ searchQuery, domainFilter, statusFilter }) {
   const { organizationProfile, controlWorkflowFields, updateControlWorkflowStatus } = useCMMCWorkflowState();
+  const sprsMetrics = useCMMCSPRSCalculation();
   const [openDomains, setOpenDomains] = useState({ AC: true });
   const normalizedSearch = searchQuery.trim().toLowerCase();
   const organizationProfileSearchText = useMemo(
@@ -43,6 +45,13 @@ function CMMCOrganizationContent({ searchQuery, domainFilter, statusFilter }) {
   );
 
   const statusCounts = useMemo(() => {
+    if (Number(sprsMetrics.totalControls)) {
+      return {
+        Completed: Number(sprsMetrics.completedControls) || 0,
+        "In Progress": Number(sprsMetrics.inProgressControls) || 0,
+        "Not Started": Number(sprsMetrics.notStartedControls) || 0,
+      };
+    }
     return workflowDomainGroups.flatMap((domain) => domain.controls.map((control) => control.status)).reduce(
       (counts, status) => {
         if (counts[status] !== undefined) counts[status] += 1;
@@ -50,7 +59,7 @@ function CMMCOrganizationContent({ searchQuery, domainFilter, statusFilter }) {
       },
       { "Not Started": 0, "In Progress": 0, Completed: 0 }
     );
-  }, [workflowDomainGroups]);
+  }, [sprsMetrics.completedControls, sprsMetrics.inProgressControls, sprsMetrics.notStartedControls, sprsMetrics.totalControls, workflowDomainGroups]);
   const notStartedTotal = statusCounts["Not Started"];
   const visibleDomains = useMemo(() => {
     return workflowDomainGroups

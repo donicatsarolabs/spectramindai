@@ -69,7 +69,7 @@ export default function Topbar() {
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3">
-          {canManageWorkspace(user?.role) && <div className="relative" ref={cartMenuRef}>
+          {canManageWorkspace(user?.role) && user?.onboardingComplete && user?.organizationId && <div className="relative" ref={cartMenuRef}>
             <button type="button" onClick={() => { setIsCartOpen(value => !value); setShowProfile(false); }} className="relative inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-bold text-slate-800 shadow-sm transition hover:-translate-y-0.5 hover:border-amber-300 hover:shadow-md" aria-label={`Framework cart with ${cartCount} items`}>
               <ShoppingCart size={20}/><span className="hidden sm:inline">Cart</span>
               {cartCount > 0 && <span className="absolute -right-2 -top-2 grid h-6 min-w-6 place-items-center rounded-full bg-blue-700 px-1 text-xs font-black text-white">{cartCount}</span>}

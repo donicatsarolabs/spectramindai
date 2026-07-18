@@ -14,6 +14,7 @@ import { evidenceRoutes } from "./modules/evidence/routes.js";
 import { workflowRoutes } from "./modules/workflows/routes.js";
 import { peopleRoutes } from "./modules/people/routes.js";
 import { assuranceRoutes } from "./modules/assurance/routes.js";
+import { cmmcRoutes } from "./modules/cmmc/routes.js";
 import { workspaceRoutes } from "./modules/workspace/routes.js";
 import { organizationRoutes } from "./modules/organizations/routes.js";
 import { trustRoutes } from "./modules/trust/routes.js";
@@ -44,6 +45,7 @@ export async function buildApp() {
   await app.register(workflowRoutes, { prefix: "/api/v1" });
   await app.register(peopleRoutes, { prefix: "/api/v1" });
   await app.register(assuranceRoutes, { prefix: "/api/v1" });
+  await app.register(cmmcRoutes, { prefix: "/api/v1" });
   await app.register(workspaceRoutes, { prefix: "/api/v1" });
   await app.register(trustRoutes, { prefix: "/api/v1" });
 

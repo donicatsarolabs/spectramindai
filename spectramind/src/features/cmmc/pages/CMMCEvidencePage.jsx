@@ -1,12 +1,14 @@
 import { FileText, Pin, Printer, ScrollText } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { isApiEnabled } from "../../../api/client";
+import { uploadEvidenceFile } from "../../../api/evidence";
 import {
   CMMC_FRAMEWORK_ID,
   getFrameworkLibrary,
 } from "../../../core/engines/framework-engine/frameworkRegistry";
 import { CMMCImplementationLayout, useCMMCWorkspaceFilters } from "../components";
-import { useCMMCWorkflowState } from "../hooks";
+import { useCMMCSPRSCalculation, useCMMCWorkflowState } from "../hooks";
 import {
   CMMC_ACTIVITY_TYPES,
   buildCMMCPolicyDocumentMetrics,
@@ -59,21 +61,23 @@ export default function CMMCEvidencePage() {
   const [searchParams] = useSearchParams();
   const requestedTab = searchParams.get("tab");
   const selectedPolicyKey = searchParams.get("item") || searchParams.get("itemId") || "";
+  const selectedControlId = searchParams.get("controlId") || "";
   return (
     <CMMCImplementationLayout>
       <CMMCEvidenceContent
-        key={`${resetVersion}:${requestedTab || ""}:${selectedPolicyKey}`}
+        key={`${resetVersion}:${requestedTab || ""}:${selectedPolicyKey}:${selectedControlId}`}
         searchQuery={searchQuery}
         domainFilter={domainFilter}
         statusFilter={statusFilter}
         requestedTab={requestedTab}
         selectedPolicyKey={selectedPolicyKey}
+        selectedControlId={selectedControlId}
       />
     </CMMCImplementationLayout>
   );
 }
 
-function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requestedTab, selectedPolicyKey }) {
+function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requestedTab, selectedPolicyKey, selectedControlId }) {
   const {
     scopeAnswers,
     organizationProfile,
@@ -84,19 +88,21 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
     updateControlWorkflowStatus,
     updateEvidenceWorkflowField,
   } = useCMMCWorkflowState();
+  const sprsMetrics = useCMMCSPRSCalculation();
   const [activeTab, setActiveTab] = useState(() =>
     tabs.some((tab) => tab.id === requestedTab) ? requestedTab : "ssp"
   );
   const [sspForm, setSspForm] = useState(initialSspForm);
   const [poamMilestones, setPoamMilestones] = useState(initialPoamMilestones);
+  const [attachmentUploadStatusByControl, setAttachmentUploadStatusByControl] = useState({});
   const normalizedSearch = searchQuery.trim().toLowerCase();
   const workflowSspForm = useMemo(
     () => buildWorkflowSspForm(organizationProfile, scopeAnswers),
     [organizationProfile, scopeAnswers]
   );
   const sspFormValues = useMemo(
-    () => ({ ...sspForm, ...workflowSspForm }),
-    [sspForm, workflowSspForm]
+    () => ({ ...sspForm, ...workflowSspForm, currentSprs: formatMetricNumber(sprsMetrics.currentSPRSScore) }),
+    [sprsMetrics.currentSPRSScore, sspForm, workflowSspForm]
   );
   const workflowEvidenceRows = useMemo(
     () =>
@@ -214,6 +220,7 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
   );
 
   const updateSspForm = (field, value) => {
+    if (field === "currentSprs") return;
     const workflowAnswerId = sspWorkflowAnswerIds[field];
     if (workflowAnswerId) {
       updateScopeAnswer(workflowAnswerId, value);
@@ -246,10 +253,44 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
     }
   };
 
-  const attachEvidenceFiles = (controlId, currentAttachments, files) => {
+  const attachEvidenceFiles = async (controlId, currentAttachments, files) => {
+    const selectedFiles = Array.from(files || []);
+    if (!selectedFiles.length) return;
+
+    if (isApiEnabled) {
+      const evidenceRow = workflowEvidenceRows.find((row) => row.controlId === controlId) || {};
+      setAttachmentUploadStatusByControl((current) => ({
+        ...current,
+        [controlId]: "Uploading evidence...",
+      }));
+
+      try {
+        for (const file of selectedFiles) {
+          await uploadEvidenceFile({
+            frameworkId: CMMC_FRAMEWORK_ID,
+            file,
+            description: evidenceRow.evidence || evidenceRow.requirement || "",
+            controlIds: [controlId],
+            tags: ["cmmc", controlId].filter(Boolean),
+          });
+        }
+        setAttachmentUploadStatusByControl((current) => ({
+          ...current,
+          [controlId]: `${selectedFiles.length} evidence file${selectedFiles.length === 1 ? "" : "s"} uploaded and linked.`,
+        }));
+        window.dispatchEvent(new Event("spectramind:workspace-updated"));
+      } catch (error) {
+        setAttachmentUploadStatusByControl((current) => ({
+          ...current,
+          [controlId]: error.message || "Evidence upload failed.",
+        }));
+        return;
+      }
+    }
+
     const nextAttachments = [
       ...(Array.isArray(currentAttachments) ? currentAttachments : []),
-      ...Array.from(files || []).map(fileToAttachmentMetadata).filter(Boolean),
+      ...selectedFiles.map(fileToAttachmentMetadata).filter(Boolean),
     ];
 
     updateControlAttachments(controlId, nextAttachments);
@@ -304,6 +345,8 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
             controls={visibleSspControls}
             onNoteChange={(evidenceKey, value) => updateEvidenceWorkflowField(evidenceKey, "notesGaps", value)}
             onAttachFiles={attachEvidenceFiles}
+            selectedControlId={selectedControlId}
+            uploadStatusByControl={attachmentUploadStatusByControl}
             onExportPDF={exportSSPToPDF}
           />
         )}
@@ -315,7 +358,13 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
   );
 }
 
-function SSPView({ form, onChange, controls, onNoteChange, onAttachFiles, onExportPDF }) {
+function SSPView({ form, onChange, controls, onNoteChange, onAttachFiles, selectedControlId, uploadStatusByControl, onExportPDF }) {
+  const selectedControlRef = useRef(null);
+
+  useEffect(() => {
+    selectedControlRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [selectedControlId]);
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -341,7 +390,7 @@ function SSPView({ form, onChange, controls, onNoteChange, onAttachFiles, onExpo
           <TextField label="System Owner / ISSO" value={form.owner} placeholder="Name and title of the system owner" onChange={(value) => onChange("owner", value)} />
           <TextField label="SSP Version" value={form.version} onChange={(value) => onChange("version", value)} />
           <TextField label="Date" type="date" value={form.date} onChange={(value) => onChange("date", value)} />
-          <TextField label="Current SPRS Score" value={form.currentSprs} onChange={(value) => onChange("currentSprs", value)} />
+          <TextField label="Current SPRS Score" value={form.currentSprs} readOnly onChange={(value) => onChange("currentSprs", value)} />
         </div>
         <TextArea label="System Boundary / Scope" value={form.scope} placeholder="Describe the boundary of the system - what hardware, software, networks, and data are in scope for CUI protection..." onChange={(value) => onChange("scope", value)} />
         <TextArea label="System Environment Description" value={form.environment} placeholder="Describe the operating environment - on-premise, cloud, hybrid, network topology, key technologies in use..." onChange={(value) => onChange("environment", value)} />
@@ -354,8 +403,17 @@ function SSPView({ form, onChange, controls, onNoteChange, onAttachFiles, onExpo
       </div>
 
       <div className="space-y-3">
-        {controls.map((row) => (
-          <article key={row.key} className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        {controls.map((row) => {
+          const isSelected = Boolean(selectedControlId) && row.controlId === selectedControlId;
+
+          return (
+          <article
+            key={row.key}
+            ref={isSelected ? selectedControlRef : undefined}
+            className={`overflow-hidden rounded-lg border bg-white shadow-sm ${
+              isSelected ? "border-amber-500 ring-4 ring-amber-100" : "border-slate-200"
+            }`}
+          >
             <div className="flex items-center justify-between bg-violet-600 px-4 py-3 text-white">
               <div className="flex items-center gap-3">
                 <span className="rounded bg-white/20 px-2 py-1 text-xs font-black">{row.domain}</span>
@@ -384,10 +442,12 @@ function SSPView({ form, onChange, controls, onNoteChange, onAttachFiles, onExpo
               <AttachmentSection
                 attachments={row.attachments}
                 onFilesSelected={(files) => onAttachFiles(row.controlId, row.attachments, files)}
+                uploadStatus={uploadStatusByControl?.[row.controlId]}
               />
             </div>
           </article>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -647,11 +707,11 @@ function getAnswerText(scopeAnswers, key) {
   return formatWorkflowValue(scopeAnswers?.[key]);
 }
 
-function TextField({ label, value, placeholder, type = "text", onChange }) {
+function TextField({ label, value, placeholder, type = "text", readOnly = false, onChange }) {
   return (
     <label className="block">
       <span className="text-xs font-black uppercase tracking-wide text-slate-400">{label}</span>
-      <input type={type} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} className="mt-2 h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200" />
+      <input type={type} value={value} placeholder={placeholder} readOnly={readOnly} onChange={(event) => onChange?.(event.target.value)} className="mt-2 h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm font-semibold outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-200 read-only:bg-slate-50 read-only:text-slate-500" />
     </label>
   );
 }
@@ -665,7 +725,7 @@ function TextArea({ label, value, placeholder, onChange }) {
   );
 }
 
-function AttachmentSection({ attachments = [], onFilesSelected }) {
+function AttachmentSection({ attachments = [], onFilesSelected, uploadStatus }) {
   return (
     <div className="mt-4 rounded border border-slate-200 bg-white px-3 py-3">
       <label className="block">
@@ -681,6 +741,11 @@ function AttachmentSection({ attachments = [], onFilesSelected }) {
           className="mt-2 block w-full text-xs font-semibold text-slate-600 file:mr-3 file:rounded file:border-0 file:bg-violet-100 file:px-3 file:py-2 file:text-xs file:font-black file:text-violet-700"
         />
       </label>
+      {uploadStatus ? (
+        <p className="mt-2 rounded bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700">
+          {uploadStatus}
+        </p>
+      ) : null}
       <div className="mt-3 space-y-2">
         {attachments.map((attachment, index) => (
           <div key={`${attachment.fileName}-${attachment.uploadedAt}-${index}`} className="flex flex-col gap-1 rounded bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600 sm:flex-row sm:items-center sm:justify-between">
@@ -719,6 +784,11 @@ function formatFileSize(value) {
   if (size >= 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
   if (size >= 1024) return `${Math.round(size / 1024)} KB`;
   return `${size} B`;
+}
+
+function formatMetricNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? String(Math.round(number)) : "";
 }
 
 function formatAttachmentDate(value) {

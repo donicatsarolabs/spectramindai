@@ -1,7 +1,17 @@
 const SESSION_KEY = "spectramind:session";
 const LEGACY_GOOGLE_USER_KEY = "spectramind_google_user";
 
-export function createUserSession({ id, name, email, picture, organizationId, organizationName, role, onboardingComplete }) {
+export function createUserSession({
+  id,
+  name,
+  email,
+  picture,
+  organizationId,
+  organizationName,
+  role,
+  onboardingComplete,
+  organizationSetupSkipped,
+}) {
   const normalizedEmail = String(email || "").trim().toLowerCase();
   const displayName = String(name || normalizedEmail.split("@")[0] || "User").trim();
   const orgName = String(organizationName || "").trim();
@@ -15,6 +25,7 @@ export function createUserSession({ id, name, email, picture, organizationId, or
     organizationName: orgName,
     role: normalizeRole(role),
     onboardingComplete: onboardingComplete ?? Boolean(orgId && orgName),
+    organizationSetupSkipped: Boolean(organizationSetupSkipped),
     picture: picture || "",
     createdAt: new Date().toISOString(),
   };

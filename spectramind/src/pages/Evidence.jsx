@@ -46,7 +46,7 @@ function EvidenceContent({ activeFramework }) {
   const [loading, setLoading] = useState(isApiEnabled);
   const [error, setError] = useState("");
   useEffect(() => {
-    if (!isApiEnabled || activeFramework.slug === "cmmc") return;
+    if (!isApiEnabled) return;
     const frameworkId = activeFramework.id;
     let cancelled = false;
     listEvidence(frameworkId)
@@ -60,7 +60,7 @@ function EvidenceContent({ activeFramework }) {
     [controlWorkflowFields]
   );
   const records = useMemo(
-    () => mergeEvidenceRecords(isApiEnabled && activeFramework.slug !== "cmmc" ? apiRecords : evidenceStore.records, cmmcEvidenceRecords).filter((record) => !record.deletedAt),
+    () => mergeEvidenceRecords(isApiEnabled ? apiRecords : evidenceStore.records, cmmcEvidenceRecords).filter((record) => !record.deletedAt),
     [activeFramework.slug, apiRecords, cmmcEvidenceRecords, evidenceStore.records]
   );
   const openImplementationRecord = (itemId, itemType, evidenceId) => {

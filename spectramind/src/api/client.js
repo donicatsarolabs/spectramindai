@@ -32,6 +32,9 @@ export async function apiRequest(path, options = {}) {
     error.status = response.status;
     error.code = body?.code;
     error.details = body?.details;
+    error.validationFailed = Boolean(body?.validationFailed);
+    error.missingEvidence = Array.isArray(body?.missingEvidence) ? body.missingEvidence : [];
+    error.requestId = body?.requestId;
     throw error;
   }
   return body;
@@ -63,6 +66,7 @@ export async function loginWithApi(email, password) {
     organizationName: organization?.name,
     role: roleLabel(organization?.role || response.user.requestedRole),
     onboardingComplete: Boolean(organization),
+    organizationSetupSkipped: false,
     apiAuthenticated: true,
   };
 }
@@ -74,7 +78,10 @@ export async function registerWithApi(input) {
   return {
     userId: response.user.id, name: response.user.name, email: response.user.email,
     organizationId: organization?.id, organizationName: organization?.name,
-    role: roleLabel(organization?.role || response.user.requestedRole), onboardingComplete: Boolean(organization), apiAuthenticated: true,
+    role: roleLabel(organization?.role || response.user.requestedRole),
+    onboardingComplete: Boolean(organization),
+    organizationSetupSkipped: Boolean(input.organizationSetupSkipped && !organization),
+    apiAuthenticated: true,
   };
 }
 

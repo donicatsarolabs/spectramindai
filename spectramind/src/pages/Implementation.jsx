@@ -12,7 +12,6 @@ import {
   Send,
   ShieldCheck,
   SlidersHorizontal,
-  UploadCloud,
 } from "lucide-react";
 import { Component, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
@@ -23,8 +22,7 @@ import { useFrameworkData } from "../core/adapters/useFrameworkData";
 import { useRelationshipGraph, getLinkedItemsFromGraph } from "../core/adapters/useRelationshipGraph";
 import { useOrganizationStore } from "../core/adapters/useOrganizationStore";
 import { useComplianceState } from "../compliance/ComplianceStateContext";
-import { DEFAULT_FRAMEWORK_ID, ISO27001_FRAMEWORK_ID, resolveFrameworkId } from "../core/engines/framework-engine/frameworkRegistry";
-import { frameworks } from "../data/mockData";
+import { ISO27001_FRAMEWORK_ID, resolveFrameworkId } from "../core/engines/framework-engine/frameworkRegistry";
 import EvidenceManagementSection from "../evidence/EvidenceManagementSection";
 import { buildCrossModuleTarget, implementationTabForItemType, normalizeItemType } from "../navigation/crossModuleNavigation";
 import {
@@ -124,8 +122,16 @@ export default function Implementation() {
   const frameworkWorkspace = useFrameworkWorkspace();
   const requestedItemType = new URLSearchParams(location.search).get("itemType");
   const [activeTab, setActiveTab] = useState(() => implementationTabForItemType(requestedItemType, "Tests"));
-  const selectedFramework = getSelectedFramework(location, frameworkWorkspace.frameworks);
-  const selectedFrameworkId = resolveFrameworkId(selectedFramework?.slug) || DEFAULT_FRAMEWORK_ID;
+  const activeImplementationFrameworks = useMemo(
+    () => getImplementationFrameworkOptions(frameworkWorkspace.selectedFrameworks),
+    [frameworkWorkspace.selectedFrameworks]
+  );
+  const selectedFramework = getSelectedFramework(location, activeImplementationFrameworks);
+  const fallbackImplementationFramework =
+    activeImplementationFrameworks.find((framework) => framework.id === frameworkWorkspace.activeFrameworkId) ||
+    activeImplementationFrameworks[0] ||
+    null;
+  const selectedFrameworkId = selectedFramework ? resolveFrameworkId(selectedFramework.slug) || selectedFramework.id : "";
 
   // OrganizationEngine now owns workspace state — routes status changes through
   // trackControlStatus() with full audit history, while keeping the legacy
@@ -134,7 +140,7 @@ export default function Implementation() {
 
   const [questionnaireResponses, setQuestionnaireResponses] = useState(() => loadQuestionnaireResponses(selectedFrameworkId));
   const isCMMC = isCMMCFramework(selectedFramework);
-  const shouldRedirectToCanonicalCMMC = isCMMC || (!selectedFramework && isCMMCFramework(frameworkWorkspace.activeFramework));
+  const shouldRedirectToCanonicalCMMC = isCMMC || (!selectedFramework && isCMMCFramework(fallbackImplementationFramework));
   const isISO27001 = selectedFrameworkId === ISO27001_FRAMEWORK_ID;
   const currentTabs = isISO27001 ? iso27001ImplementationTabs : implementationTabs;
   const defaultActiveTab = isISO27001 ? "Mandatory Docs" : "Tests";
@@ -310,12 +316,12 @@ export default function Implementation() {
     return <CanonicalCMMCRedirect frameworkWorkspace={frameworkWorkspace} />;
   }
 
-  if (!selectedFramework && frameworkWorkspace.activeFramework?.slug) {
-    return <Navigate to={`/implementation?framework=${frameworkWorkspace.activeFramework.slug}`} replace />;
+  if (!selectedFramework && fallbackImplementationFramework?.slug) {
+    return <Navigate to={`/implementation?framework=${fallbackImplementationFramework.slug}`} replace />;
   }
 
   if (!selectedFramework) {
-    return <SelectFrameworkScreen />;
+    return <SelectFrameworkScreen frameworks={activeImplementationFrameworks} />;
   }
 
   const shouldShowWorkspace = !isCMMC && workspaceItem;
@@ -340,9 +346,9 @@ export default function Implementation() {
             <div className="flex flex-col items-start gap-3 xl:items-end">
               <FrameworkSwitcher
                 activeSlug={selectedFramework.slug}
-                frameworks={frameworkWorkspace.frameworks}
+                frameworks={activeImplementationFrameworks}
                 onSelect={(framework) => {
-                  frameworkWorkspace.selectFramework(framework.id);
+                  frameworkWorkspace.setActiveFramework(framework.id);
                   navigate(framework.slug === "cmmc" ? "/cmmc" : `/implementation?framework=${framework.slug}`);
                 }}
               />
@@ -432,8 +438,8 @@ function FrameworkSwitcher({ activeSlug, frameworks = [], onSelect }) {
   );
 }
 
-function SelectFrameworkScreen() {
-  const { selectFramework } = useFrameworkWorkspace();
+function SelectFrameworkScreen({ frameworks = [] }) {
+  const { setActiveFramework } = useFrameworkWorkspace();
 
   return (
     <AppShell>
@@ -452,7 +458,7 @@ function SelectFrameworkScreen() {
 
         <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
           {frameworks.map((framework) => {
-            const slug = framework.slug || slugifyFramework(framework.name);
+            const slug = framework.slug;
             const isCMMCCard = isCMMCFramework(framework);
 
             return (
@@ -460,7 +466,7 @@ function SelectFrameworkScreen() {
                 key={framework.id}
                 to={isCMMCCard ? "/cmmc" : `/implementation?framework=${slug}`}
                 state={isCMMCCard ? undefined : { framework }}
-                onClick={isCMMCCard ? () => selectFramework("cmmc") : undefined}
+                onClick={() => setActiveFramework(framework.id)}
                 className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg"
               >
                 <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
@@ -469,9 +475,9 @@ function SelectFrameworkScreen() {
                 <h2 className="mt-5 text-2xl font-bold text-slate-950">
                   {framework.name}
                 </h2>
-                <p className="mt-1 text-slate-500">{framework.status}</p>
+                <p className="mt-1 text-slate-500">{framework.status || "Active"}</p>
                 <div className="mt-5 flex items-center justify-between text-sm font-semibold text-slate-700">
-                  <span>{framework.progress}% complete</span>
+                  <span>{typeof framework.progress === "number" ? `${framework.progress}% complete` : "Open workspace"}</span>
                   <ArrowRight size={18} />
                 </div>
               </Link>
@@ -2823,7 +2829,6 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, works
     const isReady = ["ready", "approved", "implemented", "complete", "completed"].includes(
       String(organizationStatus).toLowerCase()
     );
-    const uploadUrl = `/implementation/mandatory-documents/${encodeURIComponent(item.id)}/upload?framework=${framework?.slug || "iso-27001"}`;
 
     return (
       <aside className="h-full min-w-0 overflow-y-auto bg-white p-5 space-y-6 w-full">
@@ -2856,18 +2861,9 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, works
         <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-4">
           <h4 className="text-[10px] font-black uppercase tracking-wider text-blue-700">Mandatory Document</h4>
           <p className="mt-2 text-sm leading-6 text-slate-700">
-            {safeDisplayText(item.description, `Upload and maintain the ${safeDisplayText(item.title || item.name || item.id, "selected")} document for the selected framework.`)}
+            {safeDisplayText(item.description, `Review the ${safeDisplayText(item.title || item.name || item.id, "selected")} policy document status for the selected framework.`)}
           </p>
         </div>
-
-        <Link
-          to={uploadUrl}
-          state={{ document: item, framework }}
-          className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800"
-        >
-          <UploadCloud size={17} />
-          Upload Document
-        </Link>
 
         <div className="grid gap-3 border-b border-slate-100 pb-5 text-sm">
           <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Details</h4>
@@ -2900,7 +2896,7 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, works
 
         <div className="space-y-3 border-b border-slate-100 pb-5">
           <div className="flex items-center justify-between">
-            <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Uploaded Documents</h4>
+            <h4 className="text-xs font-black uppercase tracking-wider text-slate-400">Linked Documents</h4>
             <button
               type="button"
               onClick={() => updateOrganizationStatus("Ready")}
@@ -2939,7 +2935,7 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, works
             </div>
           ) : !mappedPolicyDocument ? (
             <p className="rounded-lg border border-dashed border-slate-200 px-4 py-5 text-center text-xs font-semibold text-slate-400">
-              No documents uploaded yet.
+              No policy document linked yet.
             </p>
           ) : null}
         </div>
@@ -3704,35 +3700,8 @@ function isCMMCFramework(framework) {
 function getSelectedFramework(location, frameworkCatalog = []) {
   const searchParams = new URLSearchParams(location.search);
   const selectedSlug = searchParams.get("framework");
-  const stateFramework = location.state?.framework;
 
-  if (stateFramework && slugifyFramework(stateFramework.name) === selectedSlug) {
-    return {
-      ...stateFramework,
-      slug: selectedSlug,
-    };
-  }
-
-  const catalogFramework = frameworkCatalog.find((item) => item.slug === selectedSlug);
-  if (catalogFramework && frameworkHasLibrary(catalogFramework.id)) {
-    return catalogFramework;
-  }
-
-  const framework = frameworks.find((item) => {
-    const slug = item.slug || slugifyFramework(item.name);
-    return slug === selectedSlug;
-  });
-
-  if (!framework) return null;
-
-  return {
-    ...framework,
-    slug: selectedSlug,
-  };
-}
-
-function slugifyFramework(name) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  return frameworkCatalog.find((item) => item.slug === selectedSlug) || null;
 }
 
 function getImplementationFrameworkOptions(frameworks = []) {

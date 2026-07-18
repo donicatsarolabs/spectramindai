@@ -4,7 +4,7 @@ import {
   CMMCProgressRing,
   CMMCSectionCard,
 } from "../components";
-import { overviewMetrics } from "../data";
+import { useCMMCSPRSCalculation } from "../hooks";
 
 const RING_SIZE = 112;
 const RING_STROKE = 10;
@@ -15,6 +15,8 @@ const RING_TEXT_COLOR = "#25221d";
 
 export default function CMMCOverviewPage() {
   const [cardsVisible, setCardsVisible] = useState(false);
+  const sprsMetrics = useCMMCSPRSCalculation();
+  const overviewMetrics = buildOverviewMetrics(sprsMetrics);
 
   useEffect(() => {
     const frameId = requestAnimationFrame(() => setCardsVisible(true));
@@ -64,4 +66,60 @@ export default function CMMCOverviewPage() {
       </CMMCSectionCard>
     </CMMCPageLayout>
   );
+}
+
+function buildOverviewMetrics(sprsMetrics = {}) {
+  const totalControls = Number(sprsMetrics.totalControls) || 0;
+  const scoreRange = sprsMetrics.scoreRange || {};
+  const totalPoints = Number(scoreRange.totalDeductionPoints) || (Number(sprsMetrics.pointsSecured) || 0) + (Number(sprsMetrics.pointsAtRisk) || 0);
+  const pointsSecured = Number(sprsMetrics.pointsSecured) || 0;
+  const pointsAtRisk = Number(sprsMetrics.pointsAtRisk) || 0;
+  const criticalGapCount = Number(sprsMetrics.criticalGapCount) || 0;
+
+  return [
+    {
+      id: "sprs",
+      title: "SPRS Position",
+      value: clampPercent(sprsMetrics.normalizedProgress),
+      subtitle: `${formatNumber(sprsMetrics.currentSPRSScore)} / ${formatNumber(scoreRange.maximum ?? 110)}`,
+      color: sprsMetrics.riskBand?.color || "#9d6f38",
+    },
+    {
+      id: "readiness",
+      title: "Readiness",
+      value: clampPercent(sprsMetrics.readinessPercentage),
+      subtitle: `${formatNumber(sprsMetrics.completedControls)} / ${formatNumber(totalControls)} ready`,
+      color: "#a87534",
+    },
+    {
+      id: "secured",
+      title: "Points Secured",
+      value: totalPoints ? clampPercent((pointsSecured / totalPoints) * 100) : 0,
+      subtitle: `${formatNumber(pointsSecured)} / ${formatNumber(totalPoints)} SPRS points`,
+      color: "#16a34a",
+    },
+    {
+      id: "risk",
+      title: "Points at Risk",
+      value: totalPoints ? clampPercent(100 - (pointsAtRisk / totalPoints) * 100) : 0,
+      subtitle: `${formatNumber(pointsAtRisk)} points at risk`,
+      color: "#dc2626",
+    },
+    {
+      id: "critical",
+      title: "Critical Gaps",
+      value: totalControls ? clampPercent(100 - (criticalGapCount / totalControls) * 100) : 0,
+      subtitle: `${formatNumber(criticalGapCount)} high-value gaps`,
+      color: "#d8b46d",
+    },
+  ];
+}
+
+function clampPercent(value) {
+  return Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
+}
+
+function formatNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? String(Math.round(number)) : "0";
 }

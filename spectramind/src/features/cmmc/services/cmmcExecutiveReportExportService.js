@@ -25,7 +25,6 @@ import {
 import { calculateCMMCSPRSMetrics } from "./cmmcSPRSCalculationService";
 
 const cmmcLibrary = getFrameworkLibrary(CMMC_FRAMEWORK_ID) || emptyFrameworkLibrary();
-const DEFAULT_CURRENT_SPRS_SCORE = "-203";
 
 export function exportCMMCExecutiveReportToPDF(options = {}) {
   const reportData = buildCMMCExecutiveReportData(options);
@@ -46,7 +45,7 @@ export function buildCMMCExecutiveReportData({
   policyMetrics,
   activityHistory = loadCMMCActivityHistory(),
   assessmentDate,
-  currentSprsScore = DEFAULT_CURRENT_SPRS_SCORE,
+  currentSprsScore,
 } = {}) {
   const normalizedWorkflowState = workflowState || {};
   const controlWorkflowFields = normalizedWorkflowState.controls?.fields || {};
@@ -70,7 +69,10 @@ export function buildCMMCExecutiveReportData({
   const recentActivity = buildRecentActivitySummary(activities);
   const metrics = {
     ...dashboardMetrics,
-    currentSprsScore: formatWorkflowValue(currentSprsScore),
+    currentSprsScore: formatWorkflowValue(currentSprsScore ?? resolvedSprsMetrics.currentSPRSScore),
+    pointsSecured: Number(resolvedSprsMetrics.pointsSecured) || 0,
+    pointsAtRisk: Number(resolvedSprsMetrics.pointsAtRisk) || 0,
+    criticalGapCount: Number(resolvedSprsMetrics.criticalGapCount) || 0,
     assessmentDate: resolveAssessmentDate(assessmentDate, normalizedWorkflowState),
     recentActivity,
   };
@@ -109,6 +111,9 @@ function buildExecutiveReportDocumentLines(reportData) {
 
   addSection(lines, "Executive Metrics");
   addField(lines, "Current SPRS Score", metrics.currentSprsScore);
+  addField(lines, "SPRS Points Secured", metrics.pointsSecured);
+  addField(lines, "SPRS Points At Risk", metrics.pointsAtRisk);
+  addField(lines, "Critical Gaps", metrics.criticalGapCount);
   addField(lines, "Compliance Percentage", formatPercent(metrics.compliancePercentage));
   addField(lines, "Completion Percentage", formatPercent(metrics.completionPercentage));
   addField(lines, "Total Controls", metrics.totalControls);

@@ -106,7 +106,7 @@ export default function Login() {
     try {
       const nextSession = await loginWithPassword(email, password, { remember: true });
       if (!nextSession.onboardingComplete) {
-        navigate(findLocalInvitations(nextSession.email).length ? "/join-organization" : nextSession.role === "User" ? "/join-organization" : "/onboarding/organization");
+        navigate(nextSession.organizationSetupSkipped ? "/dashboard" : findLocalInvitations(nextSession.email).length ? "/join-organization" : nextSession.role === "User" ? "/join-organization" : "/onboarding/organization");
       } else {
         navigate("/dashboard");
       }

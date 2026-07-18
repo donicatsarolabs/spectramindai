@@ -40,6 +40,7 @@ export default function PolicyDocument() {
   const statusLabel = isPublished ? "Published" : "Draft";
   const returnTo = typeof location.state?.returnTo === "string" ? location.state.returnTo : "/policies";
   const returnLabel = returnTo.startsWith("/implementation") ? "Back to implementation" : "Back to policies";
+  const canUploadDocument = canManage && returnTo.startsWith("/policies");
   const closeDocument = () => navigate(returnTo);
 
   if (!canManage && !isPredefined && !isPublished) {
@@ -54,7 +55,7 @@ export default function PolicyDocument() {
 
   const uploadDocument = (event) => {
     const file = event.target.files?.[0];
-    if (!file || !canManage) return;
+    if (!file || !canUploadDocument) return;
     const reader = new FileReader();
     reader.onload = () => persistDocument({
       name: file.name,
@@ -99,8 +100,8 @@ export default function PolicyDocument() {
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
               {document ? <button type="button" onClick={downloadDocument} className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:bg-slate-50"><Download size={16} />Download</button> : null}
-              {canManage ? <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800"><Upload size={16} />{document ? "Replace file" : "Upload file"}<input type="file" className="hidden" onChange={uploadDocument} accept=".pdf,.doc,.docx,.txt,.md,.rtf,.csv,.xlsx,.xls,.png,.jpg,.jpeg" /></label> : null}
-              {canManage && document ? <button type="button" onClick={() => persistDocument(null)} className="grid h-10 w-10 place-items-center rounded-lg border border-rose-200 text-rose-700 transition hover:bg-rose-50" aria-label="Delete document"><Trash2 size={16} /></button> : null}
+              {canUploadDocument ? <label className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-black text-white transition hover:bg-slate-800"><Upload size={16} />{document ? "Replace file" : "Upload file"}<input type="file" className="hidden" onChange={uploadDocument} accept=".pdf,.doc,.docx,.txt,.md,.rtf,.csv,.xlsx,.xls,.png,.jpg,.jpeg" /></label> : null}
+              {canUploadDocument && document ? <button type="button" onClick={() => persistDocument(null)} className="grid h-10 w-10 place-items-center rounded-lg border border-rose-200 text-rose-700 transition hover:bg-rose-50" aria-label="Delete document"><Trash2 size={16} /></button> : null}
             </div>
           </div>
         </header>

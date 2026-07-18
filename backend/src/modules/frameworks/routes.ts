@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma.js";
 import { requireTenant } from "../../plugins/auth.js";
+import { validateCMMCImplementedEvidence } from "../../services/cmmcEvidenceValidationService.js";
 
 const activateSchema = z.object({ frameworkId: z.string().min(1) });
 const checkoutSchema = z.object({ frameworkIds: z.array(z.string().min(1)).min(1).max(20).transform(values => [...new Set(values)]) });
@@ -94,6 +95,15 @@ export async function frameworkRoutes(app: FastifyInstance) {
 
     const current = await prisma.controlImplementation.findUnique({ where: { organizationId_controlId: { organizationId: request.tenant.organizationId, controlId } } });
     if (current && input.version && current.version !== input.version) return reply.code(409).send({ code: "VERSION_CONFLICT", message: "Control was updated by another user", current });
+    const evidenceValidation = await validateCMMCImplementedEvidence(prisma, {
+      organizationId: request.tenant.organizationId,
+      frameworkId: control.frameworkId,
+      controlDbId: control.id,
+      status: input.status,
+    });
+    if (evidenceValidation.validationFailed) {
+      return reply.code(422).send(evidenceValidation);
+    }
 
     return prisma.$transaction(async (tx) => {
       const implementation = await tx.controlImplementation.upsert({

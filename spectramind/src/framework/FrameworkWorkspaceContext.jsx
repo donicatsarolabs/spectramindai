@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { getOrganizationScopedStorageKey } from "../auth/session";
+import { getOrganizationScopedStorageKey, getStoredSession } from "../auth/session";
 import { getFrameworkLibrary, resolveFrameworkId } from "../core/engines/framework-engine/frameworkRegistry";
 import { apiRequest, getApiSession, isApiEnabled } from "../api/client";
 
@@ -81,7 +81,8 @@ export function FrameworkWorkspaceProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    if (!isApiEnabled || !getApiSession()?.token) return undefined;
+    const apiSession = getApiSession();
+    if (!isApiEnabled || !apiSession?.token || !apiSession?.organizationId) return undefined;
     let cancelled = false;
     apiRequest("/api/v1/organization-frameworks")
       .then((records) => {
@@ -106,6 +107,7 @@ export function FrameworkWorkspaceProvider({ children }) {
     async (frameworkIdOrSlug) => {
       const framework = getFrameworkByIdOrSlug(frameworkIdOrSlug);
       if (!framework) return null;
+      if (!hasOrganizationWorkspace()) return null;
 
       if (isApiEnabled && getApiSession()?.token) {
         await apiRequest("/api/v1/organization-frameworks", {
@@ -132,6 +134,7 @@ export function FrameworkWorkspaceProvider({ children }) {
   const setActiveFramework = useCallback(
     (frameworkIdOrSlug) => {
       const framework = getFrameworkByIdOrSlug(frameworkIdOrSlug);
+      if (!hasOrganizationWorkspace()) return null;
       if (!framework || !workspace.selectedFrameworkIds.includes(framework.id)) return null;
 
       const nextWorkspace = {
@@ -147,6 +150,7 @@ export function FrameworkWorkspaceProvider({ children }) {
 
   const addToCart = useCallback((frameworkIdOrSlug) => {
     const framework = getFrameworkByIdOrSlug(frameworkIdOrSlug);
+    if (!hasOrganizationWorkspace()) return null;
     if (!framework || workspace.selectedFrameworkIds.includes(framework.id)) return null;
     const next = cartFrameworkIds.includes(framework.id) ? cartFrameworkIds : [...cartFrameworkIds, framework.id];
     persistFrameworkCart(next);
@@ -169,6 +173,7 @@ export function FrameworkWorkspaceProvider({ children }) {
   }, []);
 
   const checkoutCart = useCallback(async () => {
+    if (!hasOrganizationWorkspace()) return [];
     const validIds = cartFrameworkIds.filter(id => !workspace.selectedFrameworkIds.includes(id));
     if (!validIds.length) return [];
     if (isApiEnabled && getApiSession()?.token) {
@@ -268,7 +273,9 @@ function loadFrameworkWorkspace() {
   }
 
   try {
-    const raw = window.localStorage.getItem(getOrganizationScopedStorageKey(STORAGE_KEY));
+    const session = getStoredSession();
+    if (!session?.organizationId) return emptyWorkspace();
+    const raw = window.localStorage.getItem(getOrganizationScopedStorageKey(STORAGE_KEY, session));
     const parsed = raw ? JSON.parse(raw) : null;
     if (!parsed || typeof parsed !== "object") return emptyWorkspace();
 
@@ -290,7 +297,10 @@ function loadFrameworkWorkspace() {
 function persistFrameworkWorkspace(workspace) {
   if (typeof window === "undefined") return;
 
-  window.localStorage.setItem(getOrganizationScopedStorageKey(STORAGE_KEY), JSON.stringify(workspace));
+  const session = getStoredSession();
+  if (!session?.organizationId) return;
+
+  window.localStorage.setItem(getOrganizationScopedStorageKey(STORAGE_KEY, session), JSON.stringify(workspace));
   window.dispatchEvent(new Event("spectramind:framework-workspace-updated"));
   window.dispatchEvent(new Event("spectramind:active-framework-updated"));
   window.dispatchEvent(new Event("spectramind:workspace-updated"));
@@ -300,7 +310,9 @@ function persistFrameworkWorkspace(workspace) {
 function loadFrameworkCart() {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(getOrganizationScopedStorageKey(CART_STORAGE_KEY));
+    const session = getStoredSession();
+    if (!session?.organizationId) return [];
+    const raw = window.localStorage.getItem(getOrganizationScopedStorageKey(CART_STORAGE_KEY, session));
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? [...new Set(parsed.filter(id => getFrameworkByIdOrSlug(id)))] : [];
   } catch { return []; }
@@ -308,7 +320,9 @@ function loadFrameworkCart() {
 
 function persistFrameworkCart(ids) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(getOrganizationScopedStorageKey(CART_STORAGE_KEY), JSON.stringify(ids));
+  const session = getStoredSession();
+  if (!session?.organizationId) return;
+  window.localStorage.setItem(getOrganizationScopedStorageKey(CART_STORAGE_KEY, session), JSON.stringify(ids));
   window.dispatchEvent(new Event("spectramind:framework-workspace-updated"));
 }
 
@@ -317,4 +331,9 @@ function emptyWorkspace() {
     selectedFrameworkIds: [],
     activeFrameworkId: "",
   };
+}
+
+function hasOrganizationWorkspace() {
+  const session = getStoredSession();
+  return Boolean(session?.organizationId && session?.onboardingComplete);
 }

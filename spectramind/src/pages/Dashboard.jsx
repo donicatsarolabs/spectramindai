@@ -8,9 +8,12 @@ import {
   ScrollText,
   ShieldCheck,
   Wrench,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useUser } from "../auth/UserContext";
+import { canManageWorkspace } from "../auth/session";
 import ActivityFeed from "../components/dashboard/ActivityFeed";
 import ComplianceChart from "../components/dashboard/ComplianceChart";
 import AppShell from "../components/layout/AppShell";
@@ -31,14 +34,105 @@ import { buildCrossModuleTarget } from "../navigation/crossModuleNavigation";
 import { isApiEnabled } from "../api/client";
 import { loadDashboard } from "../api/dashboard";
 
+const SETUP_BANNER_DISMISSED_KEY = "spectramind:workspace-setup-banner-dismissed";
+
 export default function Dashboard() {
+  const { user } = useUser();
   const { activeFramework, selectedFrameworks } = useFrameworkWorkspace();
+  const setupIncomplete = !user?.organizationId || !user?.onboardingComplete;
+
+  if (setupIncomplete) {
+    return <DashboardSetupPrompt user={user} />;
+  }
 
   if (!selectedFrameworks.length) {
     return <ActiveFrameworkRequired />;
   }
 
   return <DashboardContent activeFramework={activeFramework || selectedFrameworks[0]} selectedFrameworks={selectedFrameworks} />;
+}
+
+function DashboardSetupPrompt({ user }) {
+  const navigate = useNavigate();
+  const setupPath = canManageWorkspace(user?.role) ? "/onboarding/organization" : "/join-organization";
+
+  return (
+    <AppShell>
+      <div className="space-y-6">
+        <WorkspaceSetupBanner user={user} setupPath={setupPath} />
+
+        <div>
+          <p className="text-sm font-black uppercase tracking-widest text-blue-700">
+            Command Center
+          </p>
+          <h1 className="mt-2 text-4xl font-black text-slate-900">
+            Dashboard
+          </h1>
+          <p className="mt-2 max-w-2xl text-slate-600">
+            Your authenticated session is active. Finish workspace setup to start managing compliance work.
+          </p>
+        </div>
+
+        <section className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-lg border border-blue-600/20 bg-blue-50 text-blue-700">
+            <Building2 size={28} />
+          </span>
+          <h2 className="mt-5 text-2xl font-black text-slate-950">Complete workspace setup</h2>
+          <p className="mx-auto mt-2 max-w-xl text-slate-600">
+            Create or join an organization before opening frameworks, implementation, evidence, assessments, and other compliance workspaces.
+          </p>
+          <button
+            type="button"
+            onClick={() => navigate(setupPath)}
+            className="mt-6 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-700 px-5 py-3 font-black text-white transition hover:bg-blue-800"
+          >
+            Complete setup
+            <ArrowUpRight size={18} />
+          </button>
+        </section>
+      </div>
+    </AppShell>
+  );
+}
+
+function WorkspaceSetupBanner({ user, setupPath }) {
+  const navigate = useNavigate();
+  const [dismissed, dismissBanner] = useSetupBannerDismissal(user);
+
+  if (dismissed) return null;
+
+  return (
+    <div role="status" className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+      <p className="font-black">Complete your workspace setup to unlock compliance automation.</p>
+      <div className="flex items-center gap-2">
+        <button type="button" onClick={() => navigate(setupPath)} className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-black text-white transition hover:bg-amber-700">
+          Complete setup
+        </button>
+        <button type="button" onClick={dismissBanner} className="rounded-lg p-2 text-amber-800 transition hover:bg-amber-100" aria-label="Dismiss setup reminder">
+          <X size={18} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function useSetupBannerDismissal(user) {
+  const storageKey = `${SETUP_BANNER_DISMISSED_KEY}:${user?.userId || user?.email || "anonymous"}`;
+  const [dismissed, setDismissed] = useState(() => readSetupBannerDismissal(storageKey));
+
+  const dismiss = () => {
+    setDismissed(true);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(storageKey, "true");
+    }
+  };
+
+  return [dismissed, dismiss];
+}
+
+function readSetupBannerDismissal(storageKey) {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(storageKey) === "true";
 }
 
 function DashboardContent({ activeFramework, selectedFrameworks }) {

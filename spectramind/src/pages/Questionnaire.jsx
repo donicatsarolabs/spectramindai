@@ -25,7 +25,7 @@ export default function Questionnaire() {
   const { activeFramework } = frameworkWorkspace;
   const navigate = useNavigate();
   const handleFrameworkSelect = (framework) => {
-    frameworkWorkspace.selectFramework(framework.id);
+    frameworkWorkspace.setActiveFramework(framework.id);
     navigate(`/questionnaire?framework=${framework.slug}`);
   };
 
@@ -39,7 +39,7 @@ export default function Questionnaire() {
         <div className="max-w-3xl space-y-5">
           <QuestionnaireHeader
             activeFramework={activeFramework}
-            frameworks={frameworkWorkspace.frameworks}
+            frameworks={frameworkWorkspace.selectedFrameworks}
             onFrameworkSelect={handleFrameworkSelect}
           />
           <div className="rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -62,7 +62,7 @@ export default function Questionnaire() {
     <QuestionnaireContent
       key={activeFramework.id}
       activeFramework={activeFramework}
-      frameworks={frameworkWorkspace.frameworks}
+      frameworks={frameworkWorkspace.selectedFrameworks}
       onFrameworkSelect={handleFrameworkSelect}
     />
   );
