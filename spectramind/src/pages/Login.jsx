@@ -30,6 +30,7 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [remember, setRemember] = useState(true);
 
   const handleGoogleCredential = useCallback(
     (response) => {
@@ -104,7 +105,7 @@ export default function Login() {
     setSubmitting(true);
     setLoginError("");
     try {
-      const nextSession = await loginWithPassword(email, password, { remember: true });
+      const nextSession = await loginWithPassword(email, password, { remember });
       if (!nextSession.onboardingComplete) {
         navigate(nextSession.organizationSetupSkipped ? "/dashboard" : findLocalInvitations(nextSession.email).length ? "/join-organization" : nextSession.role === "User" ? "/join-organization" : "/onboarding/organization");
       } else {
@@ -269,12 +270,12 @@ export default function Login() {
 
               <div className="flex items-center justify-between gap-4 text-sm">
                 <label className="flex items-center gap-2 text-slate-600">
-                  <input type="checkbox" className="h-4 w-4 rounded border-slate-300" />
+                  <input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} className="h-4 w-4 rounded border-slate-300 accent-blue-700" />
                   Remember me
                 </label>
-                <button type="button" className="font-semibold text-blue-700 hover:text-blue-800">
+                <Link to="/forgot-password" state={{ email }} className="font-semibold text-blue-700 hover:text-blue-800">
                   Forgot password?
-                </button>
+                </Link>
               </div>
 
               <button

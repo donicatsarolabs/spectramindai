@@ -1,6 +1,7 @@
 const ACCOUNTS_KEY = "spectramind:local-accounts";
 const ORGANIZATIONS_KEY = "spectramind:local-organizations";
 const INVITATIONS_KEY = "spectramind:local-invitations";
+const PASSWORD_RESETS_KEY = "spectramind:local-password-resets";
 
 function read(key) {
   try { return JSON.parse(localStorage.getItem(key) || "[]"); } catch { return []; }
@@ -41,6 +42,26 @@ export function updateLocalAccount(email, updates) {
   const normalizedEmail = normalizeEmail(email);
   const accounts = read(ACCOUNTS_KEY);
   write(ACCOUNTS_KEY, accounts.map((account) => normalizeEmail(account.email) === normalizedEmail ? { ...account, ...updates, email: normalizedEmail } : account));
+}
+
+export function createLocalPasswordReset(email) {
+  const account = findLocalAccount(email);
+  if (!account) return null;
+  const token = crypto.randomUUID();
+  const resets = read(PASSWORD_RESETS_KEY).filter(item => item.email !== account.email && item.expiresAt > Date.now());
+  write(PASSWORD_RESETS_KEY, [...resets, { token, email: account.email, expiresAt: Date.now() + 30 * 60 * 1000 }]);
+  return token;
+}
+
+export async function resetLocalAccountPassword(token, password) {
+  const resets = read(PASSWORD_RESETS_KEY);
+  const reset = resets.find(item => item.token === token && item.expiresAt > Date.now());
+  if (!reset) return false;
+  const passwordSalt = createSalt();
+  const passwordHash = await hashPassword(password, passwordSalt);
+  updateLocalAccount(reset.email, { passwordSalt, passwordHash, passwordUpdatedAt: new Date().toISOString() });
+  write(PASSWORD_RESETS_KEY, resets.filter(item => item.token !== token));
+  return true;
 }
 
 export function createLocalOrganization({ id, name, contactEmail, ownerEmail }) {

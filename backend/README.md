@@ -1,6 +1,6 @@
 # SpectraMind Backend
 
-This folder contains the local-first, AWS-ready backend for the SpectraMind compliance platform. It was added to move authentication, organization data, compliance workflows, evidence files, audit history, and dashboard calculations out of browser `localStorage` and into a durable multi-tenant API backed by PostgreSQL.
+This folder contains the local-first, Azure-ready backend for the SpectraMind compliance platform. It moves authentication, organization data, compliance workflows, evidence files, audit history, and dashboard calculations out of browser `localStorage` and into a durable multi-tenant API backed by PostgreSQL.
 
 This document records everything implemented in `backend/`, how the pieces work, how to run and verify them, what the frontend expects, and what remains before production deployment on AWS.
 
@@ -40,7 +40,7 @@ The backend, Prisma schema, migrations, seed importer, TypeScript build, health 
 | Tests | Vitest plus a real PostgreSQL smoke script |
 | Local files | Private filesystem paths under `LOCAL_FILE_ROOT` |
 | Containers | Dockerfile and Docker Compose definition |
-| AWS abstraction | Interfaces for storage, queues, and email |
+| Cloud abstraction | Interfaces for Azure Blob Storage, queues, and transactional email |
 
 The implementation is a modular monolith. Each business domain has its own route module, while all modules use one PostgreSQL database. This keeps the initial product simple and transactional without preventing modules from becoming separate AWS services later.
 

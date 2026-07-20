@@ -21,7 +21,7 @@ import { trustRoutes } from "./modules/trust/routes.js";
 import { registerAuth } from "./plugins/auth.js";
 
 export async function buildApp() {
-  const app = Fastify({ logger: { level: config.NODE_ENV === "test" ? "silent" : "info" }, requestIdHeader: "x-request-id" });
+  const app = Fastify({ logger: { level: config.NODE_ENV === "test" ? "silent" : "info" }, requestIdHeader: "x-request-id", trustProxy: config.TRUST_PROXY });
   app.addContentTypeParser("application/octet-stream", { parseAs: "buffer", bodyLimit: 100 * 1024 * 1024 }, (_request, body, done) => done(null, body));
 
   await app.register(helmet);

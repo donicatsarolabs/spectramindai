@@ -12,6 +12,7 @@ node_modules/
 **/node_modules/
 dist/
 **/dist/
+backend/framework-library/
 dist-ssr/
 coverage/
 **/coverage/

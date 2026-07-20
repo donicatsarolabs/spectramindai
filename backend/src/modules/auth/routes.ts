@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { createHash, randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma.js";
@@ -14,6 +15,7 @@ const registerSchema = z.object({
 const loginSchema = z.object({
   email: z.email().transform((value) => value.toLowerCase()),
   password: z.string().min(1),
+  remember: z.boolean().default(false),
 });
 
 export async function authRoutes(app: FastifyInstance) {
@@ -61,8 +63,42 @@ export async function authRoutes(app: FastifyInstance) {
     if (!user || !(await bcrypt.compare(input.password, user.passwordHash))) {
       return reply.code(401).send({ code: "INVALID_CREDENTIALS", message: "Invalid email or password" });
     }
-    const token = app.jwt.sign({ sub: user.id, email: user.email });
+    const token = app.jwt.sign(
+      { sub: user.id, email: user.email },
+      { expiresIn: input.remember ? "30d" : "8h" },
+    );
     return { token, user: { id: user.id, name: user.name, email: user.email, requestedRole: user.requestedRole }, organizations: user.memberships.map(membershipView) };
+  });
+
+  app.post("/forgot-password", async (request) => {
+    const { email } = z.object({ email: z.email().transform(value => value.trim().toLowerCase()) }).parse(request.body);
+    const user = await prisma.user.findUnique({ where: { email } });
+    const response: { message: string; resetToken?: string } = { message: "If an account exists for that email, password reset instructions have been created." };
+    if (!user) return response;
+
+    const resetToken = randomBytes(32).toString("hex");
+    const tokenHash = hashResetToken(resetToken);
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    await prisma.$transaction([
+      prisma.passwordResetToken.updateMany({ where: { userId: user.id, usedAt: null }, data: { usedAt: new Date() } }),
+      prisma.passwordResetToken.create({ data: { userId: user.id, tokenHash, expiresAt } }),
+    ]);
+
+    // Until an email provider is configured, development returns the token so the UI remains testable.
+    if (process.env.NODE_ENV !== "production") response.resetToken = resetToken;
+    return response;
+  });
+
+  app.post("/reset-password", async (request, reply) => {
+    const input = z.object({ token: z.string().min(32).max(256), password: z.string().min(12).max(128) }).parse(request.body);
+    const record = await prisma.passwordResetToken.findUnique({ where: { tokenHash: hashResetToken(input.token) } });
+    if (!record || record.usedAt || record.expiresAt <= new Date()) return reply.code(400).send({ code: "INVALID_RESET_TOKEN", message: "This password reset link is invalid or has expired" });
+    const passwordHash = await bcrypt.hash(input.password, 12);
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: record.userId }, data: { passwordHash } }),
+      prisma.passwordResetToken.updateMany({ where: { userId: record.userId, usedAt: null }, data: { usedAt: new Date() } }),
+    ]);
+    return { message: "Password updated successfully. You can now sign in." };
   });
 
   app.get("/me", { preHandler: [app.authenticate] }, async (request, reply) => {
@@ -73,6 +109,10 @@ export async function authRoutes(app: FastifyInstance) {
     if (!user) return reply.code(404).send({ code: "USER_NOT_FOUND", message: "User not found" });
     return { user: { id: user.id, name: user.name, email: user.email, requestedRole: user.requestedRole }, organizations: user.memberships.map(membershipView) };
   });
+}
+
+function hashResetToken(token: string) {
+  return createHash("sha256").update(token).digest("hex");
 }
 
 function sessionResponse(result: any, token: string) {

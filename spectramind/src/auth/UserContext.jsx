@@ -52,7 +52,7 @@ export function UserProvider({ children }) {
       }
       return login(authentication.account, options);
     }
-    const nextSession = await loginWithApi(email, password);
+    const nextSession = await loginWithApi(email, password, options);
     persistSession(nextSession, options);
     setSession(nextSession);
     return nextSession;

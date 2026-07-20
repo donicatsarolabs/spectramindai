@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
+    "build:azure": "npm run db:generate && node scripts/copy-framework-library.mjs && npm run build",
     "start": "node dist/src/server.js",
+    "start:azure": "prisma migrate deploy && node dist/src/server.js",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "db:generate": "prisma generate",
@@ -25,11 +27,11 @@
     "bcryptjs": "^3.0.2",
     "dotenv": "^17.2.2",
     "fastify": "^5.6.1",
+    "prisma": "^6.16.0",
     "zod": "^4.1.11"
   },
   "devDependencies": {
     "@types/node": "^24.5.2",
-    "prisma": "^6.16.0",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"

@@ -5,16 +5,20 @@ export const isApiEnabled = Boolean(API_URL);
 
 export function getApiSession() {
   if (!isApiEnabled || typeof window === "undefined") return null;
-  try { return JSON.parse(window.localStorage.getItem(API_SESSION_KEY) || "null"); }
+  try { return JSON.parse(window.localStorage.getItem(API_SESSION_KEY) || window.sessionStorage.getItem(API_SESSION_KEY) || "null"); }
   catch { return null; }
 }
 
-export function persistApiSession(session) {
-  window.localStorage.setItem(API_SESSION_KEY, JSON.stringify(session));
+export function persistApiSession(session, { remember = true } = {}) {
+  const storage = remember ? window.localStorage : window.sessionStorage;
+  const otherStorage = remember ? window.sessionStorage : window.localStorage;
+  storage.setItem(API_SESSION_KEY, JSON.stringify(session));
+  otherStorage.removeItem(API_SESSION_KEY);
 }
 
 export function clearApiSession() {
   window.localStorage.removeItem(API_SESSION_KEY);
+  window.sessionStorage.removeItem(API_SESSION_KEY);
 }
 
 export async function apiRequest(path, options = {}) {
@@ -54,10 +58,10 @@ export async function apiRequestRaw(path, options = {}) {
   return response;
 }
 
-export async function loginWithApi(email, password) {
-  const response = await apiRequest("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+export async function loginWithApi(email, password, options) {
+  const response = await apiRequest("/api/v1/auth/login", { method: "POST", body: JSON.stringify({ email, password, remember: Boolean(options?.remember) }) });
   const organization = response.organizations[0];
-  persistApiSession({ token: response.token, organizationId: organization?.id || null });
+  persistApiSession({ token: response.token, organizationId: organization?.id || null }, options);
   return {
     userId: response.user.id,
     name: response.user.name,
@@ -70,6 +74,9 @@ export async function loginWithApi(email, password) {
     apiAuthenticated: true,
   };
 }
+
+export const requestPasswordResetApi = email => apiRequest("/api/v1/auth/forgot-password", { method: "POST", body: JSON.stringify({ email }) });
+export const resetPasswordApi = (token, password) => apiRequest("/api/v1/auth/reset-password", { method: "POST", body: JSON.stringify({ token, password }) });
 
 export async function registerWithApi(input) {
   const response = await apiRequest("/api/v1/auth/register", { method: "POST", body: JSON.stringify(input) });

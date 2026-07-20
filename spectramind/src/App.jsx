@@ -3,6 +3,8 @@ import Dashboard from "./pages/Dashboard";
 
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
+import ForgotPassword from "./pages/ForgotPassword";
+import ResetPassword from "./pages/ResetPassword";
 import Signup from "./pages/Signup";
 import OrganizationSetup from "./pages/OrganizationSetup";
 import JoinOrganization from "./pages/JoinOrganization";
@@ -96,6 +98,8 @@ function App() {
         element={<Login />}
       />
       <Route path="/signup" element={<Signup />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
 
       <Route element={<ProtectedRoute />}>
         <Route path="/onboarding/organization" element={<OrganizationSetup />} />
