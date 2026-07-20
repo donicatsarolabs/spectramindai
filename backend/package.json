@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "build:azure": "npm run db:generate && node scripts/copy-framework-library.mjs && npm run build",
     "start": "node dist/src/server.js",
-    "start:azure": "prisma migrate deploy && node dist/src/server.js",
+    "start:azure": "prisma migrate deploy && node dist/prisma/seed.js && node dist/src/server.js",
     "lint": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "db:generate": "prisma generate",
