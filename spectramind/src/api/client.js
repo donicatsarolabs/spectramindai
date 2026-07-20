@@ -1,3 +1,5 @@
+import { clearStoredSession } from "../auth/session";
+
 const API_URL = String(import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
 const API_SESSION_KEY = "spectramind:api-session";
 
@@ -21,6 +23,12 @@ export function clearApiSession() {
   window.sessionStorage.removeItem(API_SESSION_KEY);
 }
 
+function clearExpiredSession(response, apiSession) {
+  if (response.status !== 401 || !apiSession?.token) return;
+  clearApiSession();
+  clearStoredSession();
+}
+
 export async function apiRequest(path, options = {}) {
   if (!isApiEnabled) throw new Error("Backend API is not configured");
   const apiSession = getApiSession();
@@ -32,6 +40,7 @@ export async function apiRequest(path, options = {}) {
   const response = await fetch(`${API_URL}${path}`, { ...options, headers });
   const body = response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {
+    clearExpiredSession(response, apiSession);
     const error = new Error(body?.message || `Request failed with status ${response.status}`);
     error.status = response.status;
     error.code = body?.code;
@@ -52,6 +61,7 @@ export async function apiRequestRaw(path, options = {}) {
   if (apiSession?.organizationId) headers.set("x-organization-id", apiSession.organizationId);
   const response = await fetch(`${API_URL}${path}`, { ...options, headers });
   if (!response.ok) {
+    clearExpiredSession(response, apiSession);
     const body = await response.json().catch(() => null);
     throw new Error(body?.message || `Request failed with status ${response.status}`);
   }

@@ -32,7 +32,7 @@ export async function authRoutes(app: FastifyInstance) {
 
     if (!input.organizationName) {
       const user = await prisma.user.create({ data: { name: input.name, email: input.email, passwordHash, requestedRole } });
-      const token = app.jwt.sign({ sub: user.id, email: user.email });
+      const token = app.jwt.sign({ sub: user.id, email: user.email }, { expiresIn: "30d" });
       return reply.code(201).send({ token, user: { id: user.id, name: user.name, email: user.email, requestedRole }, organizations: [] });
     }
     const organizationName = input.organizationName;
@@ -50,7 +50,7 @@ export async function authRoutes(app: FastifyInstance) {
       return { user, organization, membership };
     });
 
-    const token = app.jwt.sign({ sub: result.user.id, email: result.user.email });
+    const token = app.jwt.sign({ sub: result.user.id, email: result.user.email }, { expiresIn: "30d" });
     return reply.code(201).send(sessionResponse(result, token));
   });
 
