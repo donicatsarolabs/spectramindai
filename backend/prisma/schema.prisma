@@ -88,22 +88,26 @@ enum VendorRisk {
   HIGH
   CRITICAL
 }
+
 enum AssessmentStatus {
   DRAFT
   IN_REVIEW
   COMPLETED
 }
+
 enum AuditStatus {
   PLANNED
   IN_PROGRESS
   COMPLETED
   CANCELLED
 }
+
 enum FindingStatus {
   OPEN
   REVIEWED
   RESOLVED
 }
+
 enum FindingSeverity {
   LOW
   MEDIUM
@@ -118,53 +122,54 @@ enum TrustRequestStatus {
 }
 
 model User {
-  id           String                   @id @default(uuid()) @db.Uuid
-  email        String                   @unique
-  name         String
-  passwordHash String
-  requestedRole MembershipRole           @default(EMPLOYEE)
-  memberships OrganizationMembership[]
+  id                  String                   @id @default(uuid()) @db.Uuid
+  email               String                   @unique
+  name                String
+  passwordHash        String
+  requestedRole       MembershipRole           @default(EMPLOYEE)
+  memberships         OrganizationMembership[]
   acceptedInvitations OrganizationInvitation[] @relation("AcceptedInvitation")
   passwordResetTokens PasswordResetToken[]
-  createdAt    DateTime                 @default(now())
-  updatedAt    DateTime                 @updatedAt
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
 }
 
 model PasswordResetToken {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String   @db.Uuid
-  tokenHash String   @unique
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
   expiresAt DateTime
   usedAt    DateTime?
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt DateTime @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime  @default(now())
+
   @@index([userId, expiresAt])
 }
 
 model Organization {
-  id           String                   @id @default(uuid()) @db.Uuid
-  name         String
-  slug         String                   @unique
-  contactEmail String?
-  memberships  OrganizationMembership[]
-  invitations  OrganizationInvitation[]
-  frameworks   OrganizationFramework[]
-  controls     ControlImplementation[]
-  activity     ActivityEvent[]
-  questionnaireRuns QuestionnaireRun[]
-  evidence     EvidenceRecord[]
-  tasks        Task[]
-  risks        Risk[]
-  employees    Employee[]
-  policies     Policy[]
-  trainingCourses TrainingCourse[]
-  vendors      Vendor[]
-  audits       Audit[]
-  workspaceItems WorkspaceItemState[]
-  trustCenterProfile TrustCenterProfile?
+  id                  String                   @id @default(uuid()) @db.Uuid
+  name                String
+  slug                String                   @unique
+  contactEmail        String?
+  memberships         OrganizationMembership[]
+  invitations         OrganizationInvitation[]
+  frameworks          OrganizationFramework[]
+  controls            ControlImplementation[]
+  activity            ActivityEvent[]
+  questionnaireRuns   QuestionnaireRun[]
+  evidence            EvidenceRecord[]
+  tasks               Task[]
+  risks               Risk[]
+  employees           Employee[]
+  policies            Policy[]
+  trainingCourses     TrainingCourse[]
+  vendors             Vendor[]
+  audits              Audit[]
+  workspaceItems      WorkspaceItemState[]
+  trustCenterProfile  TrustCenterProfile?
   trustAccessRequests TrustAccessRequest[]
-  createdAt    DateTime                 @default(now())
-  updatedAt    DateTime                 @updatedAt
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
 }
 
 model TrustCenterProfile {
@@ -201,6 +206,7 @@ model TrustAccessRequest {
   organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
+
   @@index([organizationId, status, createdAt])
   @@index([organizationId, requestedBy])
 }
@@ -218,27 +224,29 @@ model WorkspaceItemState {
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+
   @@unique([organizationId, frameworkId, itemId])
   @@index([organizationId, frameworkId])
 }
 
 model Vendor {
-  id             String       @id @default(uuid()) @db.Uuid
-  organizationId String       @db.Uuid
+  id             String             @id @default(uuid()) @db.Uuid
+  organizationId String             @db.Uuid
   name           String
   category       String?
   website        String?
   ownerName      String?
-  risk           VendorRisk   @default(LOW)
+  risk           VendorRisk         @default(LOW)
   nextReviewDate DateTime?
-  active         Boolean      @default(true)
-  createdBy      String       @db.Uuid
-  updatedBy      String       @db.Uuid
-  version        Int          @default(1)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  active         Boolean            @default(true)
+  createdBy      String             @db.Uuid
+  updatedBy      String             @db.Uuid
+  version        Int                @default(1)
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   assessments    VendorAssessment[]
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
   @@unique([organizationId, name])
   @@index([organizationId, risk])
 }
@@ -255,153 +263,161 @@ model VendorAssessment {
   vendor      Vendor           @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
+
   @@index([vendorId, status])
 }
 
 model Audit {
-  id             String       @id @default(uuid()) @db.Uuid
-  organizationId String       @db.Uuid
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid
   frameworkId    String
   name           String
   auditType      String?
-  status         AuditStatus  @default(PLANNED)
+  status         AuditStatus    @default(PLANNED)
   auditorName    String?
   startDate      DateTime?
   targetDate     DateTime?
   completedAt    DateTime?
-  createdBy      String       @db.Uuid
-  updatedBy      String       @db.Uuid
-  version        Int          @default(1)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy      String         @db.Uuid
+  updatedBy      String         @db.Uuid
+  version        Int            @default(1)
+  organization   Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   findings       AuditFinding[]
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
   @@index([organizationId, frameworkId, status])
 }
 
 model AuditFinding {
-  id            String          @id @default(uuid()) @db.Uuid
-  auditId       String          @db.Uuid
-  externalId    String?
-  name          String
-  description   String?
-  category      String?
-  domain        String?
-  relatedItemId String?
-  severity      FindingSeverity @default(MEDIUM)
-  status        FindingStatus   @default(OPEN)
-  ownerName     String?
-  dueDate       DateTime?
-  reviewerName  String?
-  reviewerId    String?         @db.Uuid
+  id             String          @id @default(uuid()) @db.Uuid
+  auditId        String          @db.Uuid
+  externalId     String?
+  name           String
+  description    String?
+  category       String?
+  domain         String?
+  relatedItemId  String?
+  severity       FindingSeverity @default(MEDIUM)
+  status         FindingStatus   @default(OPEN)
+  ownerName      String?
+  dueDate        DateTime?
+  reviewerName   String?
+  reviewerId     String?         @db.Uuid
   reviewComments String?
-  reviewedAt    DateTime?
-  resolvedAt    DateTime?
-  resolvedBy    String?         @db.Uuid
-  version       Int             @default(1)
-  audit         Audit           @relation(fields: [auditId], references: [id], onDelete: Cascade)
-  createdAt     DateTime        @default(now())
-  updatedAt     DateTime        @updatedAt
+  reviewedAt     DateTime?
+  resolvedAt     DateTime?
+  resolvedBy     String?         @db.Uuid
+  version        Int             @default(1)
+  audit          Audit           @relation(fields: [auditId], references: [id], onDelete: Cascade)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
   @@unique([auditId, externalId])
   @@index([auditId, status, severity])
 }
 
 model Employee {
-  id             String       @id @default(uuid()) @db.Uuid
-  organizationId String       @db.Uuid
-  name           String
-  email          String
-  membershipId   String?      @unique @db.Uuid
-  accessRole     MembershipRole @default(EMPLOYEE)
-  jobRole        String?
-  employmentType String?
-  hasAccess      Boolean      @default(true)
-  startDate      DateTime?
-  endDate        DateTime?
-  tags           String[]
+  id                         String                  @id @default(uuid()) @db.Uuid
+  organizationId             String                  @db.Uuid
+  name                       String
+  email                      String
+  membershipId               String?                 @unique @db.Uuid
+  accessRole                 MembershipRole          @default(EMPLOYEE)
+  jobRole                    String?
+  employmentType             String?
+  hasAccess                  Boolean                 @default(true)
+  startDate                  DateTime?
+  endDate                    DateTime?
+  tags                       String[]
   backgroundCheckCompletedAt DateTime?
-  createdBy      String       @db.Uuid
-  updatedBy      String       @db.Uuid
-  version        Int          @default(1)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  membership     OrganizationMembership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
-  policyAssignments PolicyAssignment[]
-  trainingAssignments TrainingAssignment[]
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdBy                  String                  @db.Uuid
+  updatedBy                  String                  @db.Uuid
+  version                    Int                     @default(1)
+  organization               Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  membership                 OrganizationMembership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  policyAssignments          PolicyAssignment[]
+  trainingAssignments        TrainingAssignment[]
+  createdAt                  DateTime                @default(now())
+  updatedAt                  DateTime                @updatedAt
+
   @@unique([organizationId, email])
   @@index([organizationId, hasAccess])
 }
 
 model Policy {
-  id             String       @id @default(uuid()) @db.Uuid
-  organizationId String       @db.Uuid
+  id             String             @id @default(uuid()) @db.Uuid
+  organizationId String             @db.Uuid
   frameworkId    String
   sourcePolicyId String?
   name           String
   description    String?
   ownerName      String?
-  versionLabel   String       @default("1.0")
-  status         PolicyStatus @default(DRAFT)
+  versionLabel   String             @default("1.0")
+  status         PolicyStatus       @default(DRAFT)
   effectiveDate  DateTime?
   reviewDate     DateTime?
-  custom         Boolean      @default(true)
-  createdBy      String       @db.Uuid
-  updatedBy      String       @db.Uuid
-  version        Int          @default(1)
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  custom         Boolean            @default(true)
+  createdBy      String             @db.Uuid
+  updatedBy      String             @db.Uuid
+  version        Int                @default(1)
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   assignments    PolicyAssignment[]
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
   @@unique([organizationId, frameworkId, sourcePolicyId])
   @@index([organizationId, frameworkId, status])
 }
 
 model PolicyAssignment {
-  id             String           @id @default(uuid()) @db.Uuid
-  policyId       String           @db.Uuid
-  employeeId     String           @db.Uuid
-  assignedBy     String           @db.Uuid
+  id             String    @id @default(uuid()) @db.Uuid
+  policyId       String    @db.Uuid
+  employeeId     String    @db.Uuid
+  assignedBy     String    @db.Uuid
   acknowledgedAt DateTime?
-  acknowledgedBy String?          @db.Uuid
-  policy         Policy           @relation(fields: [policyId], references: [id], onDelete: Cascade)
-  employee       Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  acknowledgedBy String?   @db.Uuid
+  policy         Policy    @relation(fields: [policyId], references: [id], onDelete: Cascade)
+  employee       Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
   @@unique([policyId, employeeId])
   @@index([employeeId])
 }
 
 model TrainingCourse {
-  id             String       @id @default(uuid()) @db.Uuid
-  organizationId String       @db.Uuid
-  externalId     String?
-  name           String
-  description    String?
+  id                String               @id @default(uuid()) @db.Uuid
+  organizationId    String               @db.Uuid
+  externalId        String?
+  name              String
+  description       String?
   relatedFrameworks String[]
-  dueDate        DateTime?
-  custom         Boolean      @default(true)
-  createdBy      String       @db.Uuid
-  updatedBy      String       @db.Uuid
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  assignments    TrainingAssignment[]
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  dueDate           DateTime?
+  custom            Boolean              @default(true)
+  createdBy         String               @db.Uuid
+  updatedBy         String               @db.Uuid
+  organization      Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments       TrainingAssignment[]
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
   @@unique([organizationId, externalId])
 }
 
 model TrainingAssignment {
-  id             String           @id @default(uuid()) @db.Uuid
-  courseId       String           @db.Uuid
-  employeeId     String           @db.Uuid
-  assignedBy     String           @db.Uuid
-  status         AssignmentStatus @default(ASSIGNED)
-  completedAt    DateTime?
-  completedBy    String?          @db.Uuid
-  course         TrainingCourse   @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  employee       Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  id          String           @id @default(uuid()) @db.Uuid
+  courseId    String           @db.Uuid
+  employeeId  String           @db.Uuid
+  assignedBy  String           @db.Uuid
+  status      AssignmentStatus @default(ASSIGNED)
+  completedAt DateTime?
+  completedBy String?          @db.Uuid
+  course      TrainingCourse   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  employee    Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
   @@unique([courseId, employeeId])
   @@index([employeeId, status])
 }
@@ -442,20 +458,20 @@ model OrganizationInvitation {
 }
 
 model Framework {
-  id          String                   @id
-  slug        String                   @unique
-  name        String
-  version     String
-  description String?
-  metadata    Json?
-  controls    Control[]
-  organizations OrganizationFramework[]
+  id                String                  @id
+  slug              String                  @unique
+  name              String
+  version           String
+  description       String?
+  metadata          Json?
+  controls          Control[]
+  organizations     OrganizationFramework[]
   questionnaireRuns QuestionnaireRun[]
-  evidence      EvidenceRecord[]
-  tasks         Task[]
-  risks         Risk[]
-  createdAt   DateTime                 @default(now())
-  updatedAt   DateTime                 @updatedAt
+  evidence          EvidenceRecord[]
+  tasks             Task[]
+  risks             Risk[]
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
 }
 
 model Task {
@@ -488,68 +504,68 @@ model Task {
 }
 
 model Risk {
-  id               String              @id @default(uuid()) @db.Uuid
-  organizationId   String              @db.Uuid
-  frameworkId      String
-  sourceRiskId     String?
-  name             String
-  description      String?
-  domain           String?
-  relatedControls  String[]
-  ownerUserId      String?             @db.Uuid
-  ownerName        String?
-  likelihood       RiskLikelihood      @default(MEDIUM)
-  impact           RiskLikelihood      @default(MEDIUM)
-  level            RiskLevel           @default(MEDIUM)
-  treatmentStatus  RiskTreatmentStatus @default(OPEN)
-  reviewDate       DateTime?
-  custom           Boolean             @default(true)
-  createdBy        String              @db.Uuid
-  updatedBy        String              @db.Uuid
-  version          Int                 @default(1)
-  organization     Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  framework        Framework           @relation(fields: [frameworkId], references: [id], onDelete: Restrict)
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
+  id              String              @id @default(uuid()) @db.Uuid
+  organizationId  String              @db.Uuid
+  frameworkId     String
+  sourceRiskId    String?
+  name            String
+  description     String?
+  domain          String?
+  relatedControls String[]
+  ownerUserId     String?             @db.Uuid
+  ownerName       String?
+  likelihood      RiskLikelihood      @default(MEDIUM)
+  impact          RiskLikelihood      @default(MEDIUM)
+  level           RiskLevel           @default(MEDIUM)
+  treatmentStatus RiskTreatmentStatus @default(OPEN)
+  reviewDate      DateTime?
+  custom          Boolean             @default(true)
+  createdBy       String              @db.Uuid
+  updatedBy       String              @db.Uuid
+  version         Int                 @default(1)
+  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  framework       Framework           @relation(fields: [frameworkId], references: [id], onDelete: Restrict)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
 
   @@unique([organizationId, frameworkId, sourceRiskId])
   @@index([organizationId, frameworkId, treatmentStatus])
 }
 
 model Control {
-  id             String                  @id @default(uuid()) @db.Uuid
-  frameworkId    String
-  externalId     String
-  title          String
-  category       String?
-  objective      String?
-  description    String?
-  priority       String?
-  guidance       String?
-  metadata       Json?
-  framework      Framework               @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
-  implementations ControlImplementation[]
+  id               String                  @id @default(uuid()) @db.Uuid
+  frameworkId      String
+  externalId       String
+  title            String
+  category         String?
+  objective        String?
+  description      String?
+  priority         String?
+  guidance         String?
+  metadata         Json?
+  framework        Framework               @relation(fields: [frameworkId], references: [id], onDelete: Cascade)
+  implementations  ControlImplementation[]
   evidenceMappings EvidenceMapping[]
-  createdAt      DateTime                 @default(now())
-  updatedAt      DateTime                 @updatedAt
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
 
   @@unique([frameworkId, externalId])
   @@index([frameworkId, category])
 }
 
 model QuestionnaireRun {
-  id             String              @id @default(uuid()) @db.Uuid
-  organizationId String              @db.Uuid
+  id             String                @id @default(uuid()) @db.Uuid
+  organizationId String                @db.Uuid
   frameworkId    String
-  status         QuestionnaireStatus @default(DRAFT)
+  status         QuestionnaireStatus   @default(DRAFT)
   submittedAt    DateTime?
-  submittedBy    String?             @db.Uuid
-  version        Int                 @default(1)
-  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  framework      Framework           @relation(fields: [frameworkId], references: [id], onDelete: Restrict)
+  submittedBy    String?               @db.Uuid
+  version        Int                   @default(1)
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  framework      Framework             @relation(fields: [frameworkId], references: [id], onDelete: Restrict)
   answers        QuestionnaireAnswer[]
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
 
   @@index([organizationId, frameworkId])
 }
@@ -568,29 +584,31 @@ model QuestionnaireAnswer {
 }
 
 model EvidenceRecord {
-  id               String          @id @default(uuid()) @db.Uuid
-  organizationId   String          @db.Uuid
+  id               String            @id @default(uuid()) @db.Uuid
+  organizationId   String            @db.Uuid
   frameworkId      String
-  title             String
-  description       String?
-  status            EvidenceStatus @default(PENDING_UPLOAD)
-  ownerUserId       String?         @db.Uuid
-  currentVersionId  String?         @db.Uuid
-  expiresAt         DateTime?
-  tags              String[]
-  createdBy         String          @db.Uuid
-  updatedBy         String          @db.Uuid
-  organization      Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  framework         Framework       @relation(fields: [frameworkId], references: [id], onDelete: Restrict)
-  versions           EvidenceVersion[]
-  mappings           EvidenceMapping[]
-  comments           EvidenceComment[]
-  reviewerId         String?         @db.Uuid
-  reviewReason       String?
-  reviewedAt         DateTime?
-  deletedAt          DateTime?
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
+  title            String
+  description      String?
+  testId           String?
+  implementationId String?
+  status           EvidenceStatus    @default(PENDING_UPLOAD)
+  ownerUserId      String?           @db.Uuid
+  currentVersionId String?           @db.Uuid
+  expiresAt        DateTime?
+  tags             String[]
+  createdBy        String            @db.Uuid
+  updatedBy        String            @db.Uuid
+  organization     Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  framework        Framework         @relation(fields: [frameworkId], references: [id], onDelete: Restrict)
+  versions         EvidenceVersion[]
+  mappings         EvidenceMapping[]
+  comments         EvidenceComment[]
+  reviewerId       String?           @db.Uuid
+  reviewReason     String?
+  reviewedAt       DateTime?
+  deletedAt        DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
 
   @@index([organizationId, frameworkId, status])
 }
@@ -603,22 +621,23 @@ model EvidenceComment {
   userName   String
   evidence   EvidenceRecord @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
   createdAt  DateTime       @default(now())
+
   @@index([evidenceId, createdAt])
 }
 
 model EvidenceVersion {
-  id           String         @id @default(uuid()) @db.Uuid
-  evidenceId   String         @db.Uuid
-  version      Int
-  fileName     String
-  contentType  String
-  fileSize     Int
-  objectKey    String
-  checksum     String?
-  uploadedBy   String         @db.Uuid
-  uploadedAt   DateTime?
-  evidence     EvidenceRecord @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
-  createdAt    DateTime       @default(now())
+  id          String         @id @default(uuid()) @db.Uuid
+  evidenceId  String         @db.Uuid
+  version     Int
+  fileName    String
+  contentType String
+  fileSize    Int
+  objectKey   String
+  checksum    String?
+  uploadedBy  String         @db.Uuid
+  uploadedAt  DateTime?
+  evidence    EvidenceRecord @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime       @default(now())
 
   @@unique([evidenceId, version])
 }

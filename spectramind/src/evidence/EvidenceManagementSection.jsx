@@ -82,7 +82,7 @@ export default function EvidenceManagementSection({
       setUploadStatus("Uploading evidence...");
       try {
         for (const file of files) {
-          await uploadEvidenceFile({ frameworkId: context.frameworkId, file, description, controlIds: context.controlIds || [], tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean) });
+          await uploadEvidenceFile({ frameworkId: context.frameworkId, file, description, controlIds: context.controlIds || [], tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean), testId: context.testId, implementationId: context.implementationId });
         }
         const nextRecords = (await listEvidence(context.frameworkId)).map(toLegacyEvidence);
         setDescription(""); setTags(""); setUploadStatus(`${files.length} evidence file${files.length === 1 ? "" : "s"} uploaded securely.`);
