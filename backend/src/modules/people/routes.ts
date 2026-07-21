@@ -17,7 +17,15 @@ const defaultCourses = [
 
 export async function peopleRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireTenant);
-  app.get("/employees", async request => prisma.employee.findMany({ where: { organizationId: request.tenant.organizationId }, orderBy: { name: "asc" } }));
+  app.get("/employees", async request => {
+    const organizationId = request.tenant.organizationId;
+    const [employees, invitations] = await Promise.all([
+      prisma.employee.findMany({ where: { organizationId }, orderBy: { name: "asc" } }),
+      prisma.organizationInvitation.findMany({ where: { organizationId, status: "PENDING" } }),
+    ]);
+    const pendingByEmail = new Map(invitations.map(invitation => [invitation.email.toLowerCase(), invitation]));
+    return employees.map(employee => ({ ...employee, pendingInvitation: pendingByEmail.get(employee.email.toLowerCase()) ?? null }));
+  });
   app.post("/employees", async (request, reply) => { requireManager(request); const input = employeeInput.parse(request.body); const record = await prisma.$transaction(async tx => { const employee = await tx.employee.create({ data: { ...input, startDate: input.startDate ? new Date(input.startDate) : null, endDate: input.endDate ? new Date(input.endDate) : null, organizationId: request.tenant.organizationId, createdBy: request.tenant.userId, updatedBy: request.tenant.userId } }); await tx.activityEvent.create({ data: { organizationId: request.tenant.organizationId, actorUserId: request.tenant.userId, action: "employee.created", entityType: "employee", entityId: employee.id } }); return employee; }); return reply.code(201).send(record); });
   app.patch("/employees/:id", async (request, reply) => { requireManager(request); const { id } = z.object({ id: z.uuid() }).parse(request.params); const input = employeeInput.partial().extend({ version: z.number().int().positive() }).parse(request.body); const current = await ownedEmployee(id, request.tenant.organizationId); if (current.version !== input.version) return reply.code(409).send({ code: "VERSION_CONFLICT", current }); const { version: _, startDate, endDate, ...updates } = input; return prisma.employee.update({ where: { id }, data: { ...updates, startDate: startDate ? new Date(startDate) : startDate, endDate: endDate ? new Date(endDate) : endDate, updatedBy: request.tenant.userId, version: { increment: 1 } } }); });
   app.delete("/employees/:id", async (request, reply) => { requireManager(request); const { id } = z.object({ id: z.uuid() }).parse(request.params); await ownedEmployee(id, request.tenant.organizationId); await prisma.employee.delete({ where: { id } }); return reply.code(204).send(); });

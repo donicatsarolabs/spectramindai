@@ -7,7 +7,6 @@ export async function createOrganization(input) {
   return organization;
 }
 export const listMyInvitations = () => apiRequest("/api/v1/invitations/me");
-export const listInvitations = () => apiRequest("/api/v1/invitations");
 export async function acceptInvitation(token) {
   const organization = await apiRequest(`/api/v1/invitations/${token}/accept`, { method: "POST" });
   const session = getApiSession();

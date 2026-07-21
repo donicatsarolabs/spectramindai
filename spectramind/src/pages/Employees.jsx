@@ -15,7 +15,7 @@ import {
 import { POLICY_STATUS_KEY } from "../policies/PolicyService";
 import { isApiEnabled } from "../api/client";
 import { completeBackgroundCheck, createEmployee, deleteEmployee, listEmployees, updateEmployee } from "../api/people";
-import { createInvitation, listInvitations, revokeInvitation } from "../api/organizations";
+import { createInvitation, revokeInvitation } from "../api/organizations";
 import { useFrameworkWorkspace } from "../framework/FrameworkWorkspaceContext";
 
 const initialEmployees = [];
@@ -101,14 +101,11 @@ export default function Employees() {
   useEffect(() => {
     if (!isApiEnabled) return;
     let cancelled = false;
-    Promise.all([listEmployees(), listInvitations()])
-      .then(([records, invitations]) => {
+    listEmployees()
+      .then((records) => {
         if (cancelled) return;
-        const pendingByEmail = new Map(invitations
-          .filter((invitation) => invitation.status === "PENDING")
-          .map((invitation) => [invitation.email.toLowerCase(), invitation]));
         const mapped = records.map(fromApiEmployee).map((employee) => {
-          const invitation = pendingByEmail.get(employee.email.toLowerCase());
+          const invitation = employee.pendingInvitation;
           return invitation ? {
             ...employee,
             employeeStatus: "Invited",
