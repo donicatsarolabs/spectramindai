@@ -15,6 +15,7 @@ import {
 import { POLICY_STATUS_KEY } from "../policies/PolicyService";
 import { isApiEnabled } from "../api/client";
 import { completeBackgroundCheck, createEmployee, deleteEmployee, listEmployees, updateEmployee } from "../api/people";
+import { createInvitation, listInvitations, revokeInvitation } from "../api/organizations";
 import { useFrameworkWorkspace } from "../framework/FrameworkWorkspaceContext";
 
 const initialEmployees = [];
@@ -100,10 +101,21 @@ export default function Employees() {
   useEffect(() => {
     if (!isApiEnabled) return;
     let cancelled = false;
-    listEmployees()
-      .then((records) => {
+    Promise.all([listEmployees(), listInvitations()])
+      .then(([records, invitations]) => {
         if (cancelled) return;
-        const mapped = records.map(fromApiEmployee);
+        const pendingByEmail = new Map(invitations
+          .filter((invitation) => invitation.status === "PENDING")
+          .map((invitation) => [invitation.email.toLowerCase(), invitation]));
+        const mapped = records.map(fromApiEmployee).map((employee) => {
+          const invitation = pendingByEmail.get(employee.email.toLowerCase());
+          return invitation ? {
+            ...employee,
+            employeeStatus: "Invited",
+            invitationId: invitation.id,
+            tags: [...new Set([...(employee.tags || []), "Invited"])],
+          } : employee;
+        });
         setEmployees(mapped);
         setBgChecksState(Object.fromEntries(mapped.map((employee) => [employee.name, employee.backgroundCheckCompletedAt ? "Completed" : "Pending"])));
       })
@@ -247,20 +259,31 @@ export default function Employees() {
     finally { setSaving(false); }
   };
 
-  const handleInviteEmployee = (employee) => {
+  const handleInviteEmployee = async (employee) => {
     if (!canManagePeople) return;
+    setApiError("");
     try {
-      createLocalInvitations({ emails: [employee.email], role: employee.role, organizationId: user.organizationId, organizationName: user.organizationName, invitedBy: user.email });
-      setEmployees((current) => current.map((item) => item.id === employee.id ? { ...item, employeeStatus: "Invited", tags: [...new Set([...(item.tags || []), "Invited"])] } : item));
+      const invitation = isApiEnabled
+        ? await createInvitation({ email: employee.email, role: apiRole(employee.role) })
+        : createLocalInvitations({ emails: [employee.email], role: employee.role, organizationId: user.organizationId, organizationName: user.organizationName, invitedBy: user.email })[0];
+      setEmployees((current) => current.map((item) => item.id === employee.id ? { ...item, employeeStatus: "Invited", invitationId: invitation?.id, tags: [...new Set([...(item.tags || []), "Invited"])] } : item));
       setActionNotice(`Invitation sent internally to ${employee.email}.`);
     } catch (error) { setApiError(error.message || "Could not prepare this invitation."); }
   };
 
-  const handleRevokeInvitation = (employee) => {
+  const handleRevokeInvitation = async (employee) => {
     if (!canManagePeople) return;
-    revokeLocalInvitation({ email: employee.email, organizationId: user.organizationId });
-    setEmployees((current) => current.map((item) => item.id === employee.id ? { ...item, employeeStatus: "Active", tags: (item.tags || []).filter((tag) => tag !== "Invited") } : item));
-    setActionNotice(`Invitation removed for ${employee.email}.`);
+    setApiError("");
+    try {
+      if (isApiEnabled) {
+        if (!employee.invitationId) throw new Error("Pending invitation could not be identified. Refresh the page and try again.");
+        await revokeInvitation(employee.invitationId);
+      } else {
+        revokeLocalInvitation({ email: employee.email, organizationId: user.organizationId });
+      }
+      setEmployees((current) => current.map((item) => item.id === employee.id ? { ...item, employeeStatus: "Active", invitationId: undefined, tags: (item.tags || []).filter((tag) => tag !== "Invited") } : item));
+      setActionNotice(`Invitation removed for ${employee.email}.`);
+    } catch (error) { setApiError(error.message || "Could not remove this invitation."); }
   };
 
   const canRemoveEmployee = (employee) => {
@@ -944,6 +967,10 @@ function toEmployeeInput(employee) {
 function fromApiEmployee(employee) {
   const date = (value) => value ? new Date(value).toISOString().slice(0, 10) : "-";
   return { ...employee, role: employee.jobRole || employee.role || "User", type: employee.employmentType || employee.type || "Full-Time", startDate: date(employee.startDate), endDate: date(employee.endDate), tags: employee.tags || [], employeeStatus: employee.employeeStatus || "Active" };
+}
+
+function apiRole(role) {
+  return role === "Admin" ? "ADMIN" : role === "Manager" || role === "Compliance Manager" ? "COMPLIANCE_MANAGER" : "EMPLOYEE";
 }
 
 function EmployeeFilterOption({ active, onClick, children }) {
