@@ -14,4 +14,19 @@ describe("health endpoint", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().status).toBe("ok");
   });
+
+  it("allows browser preflight for authenticated file uploads", async () => {
+    const response = await app.inject({
+      method: "OPTIONS",
+      url: "/api/v1/evidence/example/versions/example/content",
+      headers: {
+        origin: "http://localhost:5173",
+        "access-control-request-method": "PUT",
+        "access-control-request-headers": "authorization,content-type,x-organization-id",
+      },
+    });
+    expect(response.statusCode).toBe(204);
+    expect(response.headers["access-control-allow-methods"]).toContain("PUT");
+    expect(response.headers["access-control-allow-headers"]).toContain("authorization");
+  });
 });

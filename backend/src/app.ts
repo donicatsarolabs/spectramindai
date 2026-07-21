@@ -25,7 +25,11 @@ export async function buildApp() {
   app.addContentTypeParser("application/octet-stream", { parseAs: "buffer", bodyLimit: 100 * 1024 * 1024 }, (_request, body, done) => done(null, body));
 
   await app.register(helmet);
-  await app.register(cors, { origin: corsOrigins, credentials: true });
+  await app.register(cors, {
+    origin: corsOrigins,
+    credentials: true,
+    methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  });
   await app.register(jwt, { secret: config.JWT_SECRET, sign: { expiresIn: config.JWT_EXPIRES_IN as any } });
   await app.register(swagger, { openapi: { info: { title: "SpectraMind API", version: "0.1.0" }, servers: [{ url: "/api/v1" }] } });
   await app.register(swaggerUi, { routePrefix: "/api/docs" });
