@@ -3177,6 +3177,7 @@ function collectRelatedIds(item, linkedItems, workspaceState) {
 function collectRelatedEvidence(records = [], relatedIds, item) {
   return records
     .filter((record) => {
+      if (record.deletedAt) return false;
       const metadata = record.metadata || {};
       const mappings = Array.isArray(record.mappings) ? record.mappings : [];
       const recordLinks = [

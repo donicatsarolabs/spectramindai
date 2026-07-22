@@ -79,7 +79,28 @@ export async function organizationRoutes(app: FastifyInstance) {
       const { id } = z.object({ id: z.uuid() }).parse(request.params);
       const invitation = await prisma.organizationInvitation.findFirst({ where: { id, organizationId: request.tenant.organizationId, status: "PENDING" } });
       if (!invitation) return reply.code(404).send({ code: "INVITATION_NOT_FOUND", message: "Pending invitation not found" });
-      await prisma.organizationInvitation.update({ where: { id }, data: { status: "REVOKED", revokedAt: new Date() } });
+      await prisma.$transaction(async tx => {
+        await tx.organizationInvitation.update({ where: { id }, data: { status: "REVOKED", revokedAt: new Date() } });
+        // A pending invitation has no joined membership yet. Remove its provisional
+        // employee row as well so it disappears from the employee table.
+        await tx.employee.deleteMany({
+          where: {
+            organizationId: request.tenant.organizationId,
+            email: invitation.email.toLowerCase(),
+            membershipId: null,
+          },
+        });
+        await tx.activityEvent.create({
+          data: {
+            organizationId: request.tenant.organizationId,
+            actorUserId: request.tenant.userId,
+            action: "invitation.revoked",
+            entityType: "invitation",
+            entityId: id,
+            metadata: { email: invitation.email },
+          },
+        });
+      });
       return reply.code(204).send();
     });
 

@@ -15,7 +15,7 @@ import {
 import { POLICY_STATUS_KEY } from "../policies/PolicyService";
 import { isApiEnabled } from "../api/client";
 import { completeBackgroundCheck, createEmployee, deleteEmployee, listEmployees, updateEmployee } from "../api/people";
-import { createInvitation, revokeInvitation } from "../api/organizations";
+import { changeMemberRole, createInvitation, revokeInvitation } from "../api/organizations";
 import { useFrameworkWorkspace } from "../framework/FrameworkWorkspaceContext";
 
 const initialEmployees = [];
@@ -278,8 +278,8 @@ export default function Employees() {
       } else {
         revokeLocalInvitation({ email: employee.email, organizationId: user.organizationId });
       }
-      setEmployees((current) => current.map((item) => item.id === employee.id ? { ...item, employeeStatus: "Active", invitationId: undefined, tags: (item.tags || []).filter((tag) => tag !== "Invited") } : item));
-      setActionNotice(`Invitation removed for ${employee.email}.`);
+      setEmployees((current) => current.filter((item) => item.id !== employee.id));
+      setActionNotice(`Invitation and provisional employee removed for ${employee.email}.`);
     } catch (error) { setApiError(error.message || "Could not remove this invitation."); }
   };
 
@@ -327,6 +327,9 @@ export default function Employees() {
     try {
       if (editingEmployeeId) {
         const current = employees.find((item) => item.id === editingEmployeeId);
+        if (isApiEnabled && current.membershipId && apiRole(current.role) !== apiRole(role)) {
+          await changeMemberRole(current.membershipId, apiRole(role));
+        }
         const updated = isApiEnabled ? fromApiEmployee(await updateEmployee(editingEmployeeId, current.version, input)) : { ...current, ...fromApiEmployee(input) };
         setEmployees((items) => items.map((item) => item.id === editingEmployeeId ? updated : item));
         if (!isApiEnabled) updateLocalOrganizationRole({ email: updated.email, organizationId: user.organizationId, role: updated.role });

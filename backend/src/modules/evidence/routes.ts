@@ -20,7 +20,7 @@ export async function evidenceRoutes(app: FastifyInstance) {
   app.get("/evidence", async (request) => {
     const query = z.object({ frameworkId: z.string().optional(), status: z.enum(["PENDING_UPLOAD", "PROCESSING", "PENDING_REVIEW", "APPROVED", "REJECTED", "EXPIRED"]).optional() }).parse(request.query);
     return prisma.evidenceRecord.findMany({
-      where: { organizationId: request.tenant.organizationId, frameworkId: query.frameworkId, status: query.status },
+      where: { organizationId: request.tenant.organizationId, frameworkId: query.frameworkId, status: query.status, deletedAt: null },
       include: { versions: { orderBy: { version: "desc" } }, mappings: { include: { control: true } }, comments: { orderBy: { createdAt: "asc" } } },
       orderBy: { updatedAt: "desc" }, take: 100,
     });
@@ -50,7 +50,7 @@ export async function evidenceRoutes(app: FastifyInstance) {
 
   app.post("/evidence/:evidenceId/versions/:versionId/complete", async (request) => {
     const { evidenceId, versionId } = z.object({ evidenceId: z.uuid(), versionId: z.uuid() }).parse(request.params);
-    const evidence = await prisma.evidenceRecord.findFirst({ where: { id: evidenceId, organizationId: request.tenant.organizationId } });
+    const evidence = await prisma.evidenceRecord.findFirst({ where: { id: evidenceId, organizationId: request.tenant.organizationId, deletedAt: null } });
     if (!evidence) throw Object.assign(new Error("Evidence not found"), { statusCode: 404 });
     const version = await ownedVersion(evidenceId, versionId, request.tenant.organizationId);
     const uploadedFile = await stat(localObjectPath(version.objectKey)).catch(() => null);
@@ -86,7 +86,7 @@ export async function evidenceRoutes(app: FastifyInstance) {
 
   app.get("/evidence/:evidenceId/download", async (request, reply) => {
     const { evidenceId } = z.object({ evidenceId: z.uuid() }).parse(request.params);
-    const evidence = await prisma.evidenceRecord.findFirst({ where: { id: evidenceId, organizationId: request.tenant.organizationId } });
+    const evidence = await prisma.evidenceRecord.findFirst({ where: { id: evidenceId, organizationId: request.tenant.organizationId, deletedAt: null } });
     if (!evidence?.currentVersionId) return reply.code(404).send({ code: "EVIDENCE_NOT_FOUND", message: "Evidence file not found" });
     const version = await ownedVersion(evidenceId, evidence.currentVersionId, request.tenant.organizationId);
     const content = await readFile(localObjectPath(version.objectKey)).catch(() => null);
@@ -111,7 +111,7 @@ function requireEvidenceDeletionAccess(role: string) {
 async function ownedEvidence(id: string, organizationId: string) { const record = await prisma.evidenceRecord.findFirst({ where: { id, organizationId, deletedAt: null } }); if (!record) throw Object.assign(new Error("Evidence not found"), { statusCode: 404 }); return record; }
 
 async function ownedVersion(evidenceId: string, versionId: string, organizationId: string) {
-  const version = await prisma.evidenceVersion.findFirst({ where: { id: versionId, evidenceId, evidence: { organizationId } } });
+  const version = await prisma.evidenceVersion.findFirst({ where: { id: versionId, evidenceId, evidence: { organizationId, deletedAt: null } } });
   if (!version) throw Object.assign(new Error("Evidence version not found"), { statusCode: 404 });
   return version;
 }

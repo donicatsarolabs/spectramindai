@@ -28,7 +28,41 @@ export async function peopleRoutes(app: FastifyInstance) {
   });
   app.post("/employees", async (request, reply) => { requireManager(request); const input = employeeInput.parse(request.body); const record = await prisma.$transaction(async tx => { const employee = await tx.employee.create({ data: { ...input, startDate: input.startDate ? new Date(input.startDate) : null, endDate: input.endDate ? new Date(input.endDate) : null, organizationId: request.tenant.organizationId, createdBy: request.tenant.userId, updatedBy: request.tenant.userId } }); await tx.activityEvent.create({ data: { organizationId: request.tenant.organizationId, actorUserId: request.tenant.userId, action: "employee.created", entityType: "employee", entityId: employee.id } }); return employee; }); return reply.code(201).send(record); });
   app.patch("/employees/:id", async (request, reply) => { requireManager(request); const { id } = z.object({ id: z.uuid() }).parse(request.params); const input = employeeInput.partial().extend({ version: z.number().int().positive() }).parse(request.body); const current = await ownedEmployee(id, request.tenant.organizationId); if (current.version !== input.version) return reply.code(409).send({ code: "VERSION_CONFLICT", current }); const { version: _, startDate, endDate, ...updates } = input; return prisma.employee.update({ where: { id }, data: { ...updates, startDate: startDate ? new Date(startDate) : startDate, endDate: endDate ? new Date(endDate) : endDate, updatedBy: request.tenant.userId, version: { increment: 1 } } }); });
-  app.delete("/employees/:id", async (request, reply) => { requireManager(request); const { id } = z.object({ id: z.uuid() }).parse(request.params); await ownedEmployee(id, request.tenant.organizationId); await prisma.employee.delete({ where: { id } }); return reply.code(204).send(); });
+  app.delete("/employees/:id", async (request, reply) => {
+    requireManager(request);
+    const { id } = z.object({ id: z.uuid() }).parse(request.params);
+    const employee = await ownedEmployee(id, request.tenant.organizationId);
+    if (employee.membershipId) {
+      const membership = await prisma.organizationMembership.findUnique({ where: { id: employee.membershipId } });
+      if (membership?.userId === request.tenant.userId) {
+        return reply.code(409).send({ code: "CANNOT_REMOVE_SELF", message: "You cannot remove your own employee profile" });
+      }
+    }
+    await prisma.$transaction(async tx => {
+      // Removing a joined employee must revoke workspace access too. Evidence is
+      // intentionally retained because it is attributed to the user UUID, not
+      // cascaded through the employee profile.
+      if (employee.membershipId) {
+        await tx.organizationMembership.delete({ where: { id: employee.membershipId } });
+      }
+      await tx.employee.delete({ where: { id } });
+      await tx.organizationInvitation.updateMany({
+        where: { organizationId: request.tenant.organizationId, email: employee.email.toLowerCase(), status: "PENDING" },
+        data: { status: "REVOKED", revokedAt: new Date() },
+      });
+      await tx.activityEvent.create({
+        data: {
+          organizationId: request.tenant.organizationId,
+          actorUserId: request.tenant.userId,
+          action: "employee.removed",
+          entityType: "employee",
+          entityId: id,
+          metadata: { email: employee.email, evidenceRetained: true },
+        },
+      });
+    });
+    return reply.code(204).send();
+  });
   app.post("/employees/:id/background-check", async request => { requireManager(request); const { id } = z.object({ id: z.uuid() }).parse(request.params); await ownedEmployee(id, request.tenant.organizationId); return prisma.$transaction(async tx => { const employee = await tx.employee.update({ where: { id }, data: { backgroundCheckCompletedAt: new Date(), updatedBy: request.tenant.userId, version: { increment: 1 } } }); await tx.activityEvent.create({ data: { organizationId: request.tenant.organizationId, actorUserId: request.tenant.userId, action: "employee.background_check.completed", entityType: "employee", entityId: id } }); return employee; }); });
 
   app.post("/policies/sync", async request => { requireManager(request); const { frameworkId } = z.object({ frameworkId: z.string() }).parse(request.body); await assertActive(request.tenant.organizationId, frameworkId); const definitions = await readFrameworkCollection(frameworkId, "policies.json", "policies"); await prisma.$transaction(definitions.map((policy: any) => prisma.policy.upsert({ where: { organizationId_frameworkId_sourcePolicyId: { organizationId: request.tenant.organizationId, frameworkId, sourcePolicyId: policy.id } }, create: { organizationId: request.tenant.organizationId, frameworkId, sourcePolicyId: policy.id, name: policy.title ?? policy.name, description: policy.description ?? policy.aiSummary, ownerName: policy.ownerRole, custom: false, createdBy: request.tenant.userId, updatedBy: request.tenant.userId }, update: { name: policy.title ?? policy.name, description: policy.description ?? policy.aiSummary, ownerName: policy.ownerRole } }))); return { synchronized: definitions.length }; });

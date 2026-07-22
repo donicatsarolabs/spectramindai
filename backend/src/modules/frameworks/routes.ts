@@ -136,7 +136,7 @@ export async function frameworkRoutes(app: FastifyInstance) {
         orderBy: { createdAt: "desc" },
         take: 20,
       }),
-      prisma.evidenceRecord.count({ where: { organizationId: request.tenant.organizationId, frameworkId: { in: frameworkIds } } }),
+      prisma.evidenceRecord.count({ where: { organizationId: request.tenant.organizationId, frameworkId: { in: frameworkIds }, deletedAt: null } }),
       prisma.evidenceMapping.findMany({
         where: { evidence: { organizationId: request.tenant.organizationId, frameworkId: { in: frameworkIds }, status: "APPROVED", deletedAt: null } },
         distinct: ["controlId"],
