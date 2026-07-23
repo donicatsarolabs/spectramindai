@@ -150,10 +150,6 @@ export function useOrganizationStore(frameworkId = null) {
       .then((data) => {
         if (!cancelled) {
           setApiWorkspaceData(data);
-          const latest = loadLegacyWorkspace(user);
-          const next = { ...latest };
-          Object.entries(data).forEach(([itemId, state]) => { next[getLegacyWorkspaceStorageKey(activeFrameworkId, itemId)] = state; });
-          persistLegacyWorkspace(next, user);
         }
       })
       .catch(() => {});

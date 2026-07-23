@@ -151,6 +151,7 @@ model Organization {
   name                String
   slug                String                   @unique
   contactEmail        String?
+  logoDataUrl         String?
   memberships         OrganizationMembership[]
   invitations         OrganizationInvitation[]
   frameworks          OrganizationFramework[]
@@ -357,6 +358,10 @@ model Policy {
   status         PolicyStatus       @default(DRAFT)
   effectiveDate  DateTime?
   reviewDate     DateTime?
+  document       Json?
+  customFieldValues Json?
+  versionHistory Json?
+  requireReacknowledgement Boolean @default(true)
   custom         Boolean            @default(true)
   createdBy      String             @db.Uuid
   updatedBy      String             @db.Uuid

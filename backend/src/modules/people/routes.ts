@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma.js";
 import { requireTenant } from "../../plugins/auth.js";
@@ -67,8 +68,43 @@ export async function peopleRoutes(app: FastifyInstance) {
 
   app.post("/policies/sync", async request => { requireManager(request); const { frameworkId } = z.object({ frameworkId: z.string() }).parse(request.body); await assertActive(request.tenant.organizationId, frameworkId); const definitions = await readFrameworkCollection(frameworkId, "policies.json", "policies"); await prisma.$transaction(definitions.map((policy: any) => prisma.policy.upsert({ where: { organizationId_frameworkId_sourcePolicyId: { organizationId: request.tenant.organizationId, frameworkId, sourcePolicyId: policy.id } }, create: { organizationId: request.tenant.organizationId, frameworkId, sourcePolicyId: policy.id, name: policy.title ?? policy.name, description: policy.description ?? policy.aiSummary, ownerName: policy.ownerRole, custom: false, createdBy: request.tenant.userId, updatedBy: request.tenant.userId }, update: { name: policy.title ?? policy.name, description: policy.description ?? policy.aiSummary, ownerName: policy.ownerRole } }))); return { synchronized: definitions.length }; });
   app.get("/policies", async request => { const query = z.object({ frameworkId: z.string() }).parse(request.query); return prisma.policy.findMany({ where: { organizationId: request.tenant.organizationId, frameworkId: query.frameworkId }, include: { assignments: true }, orderBy: { name: "asc" } }); });
-  app.post("/policies", async (request, reply) => { requireManager(request); const input = z.object({ frameworkId: z.string(), name: z.string().min(2).max(255), description: z.string().max(5000).optional(), ownerName: z.string().max(120).optional(), versionLabel: z.string().max(30).default("1.0"), effectiveDate: z.iso.datetime().nullable().optional(), reviewDate: z.iso.datetime().nullable().optional() }).parse(request.body); await assertActive(request.tenant.organizationId, input.frameworkId); const policy = await prisma.policy.create({ data: { ...input, effectiveDate: input.effectiveDate ? new Date(input.effectiveDate) : null, reviewDate: input.reviewDate ? new Date(input.reviewDate) : null, organizationId: request.tenant.organizationId, createdBy: request.tenant.userId, updatedBy: request.tenant.userId } }); return reply.code(201).send(policy); });
-  app.patch("/policies/:id", async (request, reply) => { requireManager(request); const { id } = z.object({ id: z.uuid() }).parse(request.params); const input = z.object({ name: z.string().min(2).max(255).optional(), description: z.string().max(5000).optional(), ownerName: z.string().max(120).optional(), versionLabel: z.string().max(30).optional(), status: z.enum(["DRAFT", "ACTIVE", "ARCHIVED"]).optional(), effectiveDate: z.iso.datetime().nullable().optional(), reviewDate: z.iso.datetime().nullable().optional(), version: z.number().int().positive() }).parse(request.body); const current = await prisma.policy.findFirst({ where: { id, organizationId: request.tenant.organizationId } }); if (!current) throw notFound("Policy"); if (current.version !== input.version) return reply.code(409).send({ code: "VERSION_CONFLICT", current }); const { version: _, effectiveDate, reviewDate, ...updates } = input; return prisma.policy.update({ where: { id }, data: { ...updates, effectiveDate: effectiveDate ? new Date(effectiveDate) : effectiveDate, reviewDate: reviewDate ? new Date(reviewDate) : reviewDate, updatedBy: request.tenant.userId, version: { increment: 1 } } }); });
+  app.post("/policies", async (request, reply) => {
+    requireManager(request);
+    const input = policyWriteSchema.extend({ frameworkId: z.string(), name: z.string().min(2).max(255), versionLabel: z.string().max(30).default("1.0") }).parse(request.body);
+    await assertActive(request.tenant.organizationId, input.frameworkId);
+    const { document, customFieldValues, versionHistory, ...fields } = input;
+    const policy = await prisma.policy.create({ data: {
+      ...fields,
+      document: document as Prisma.InputJsonValue | undefined,
+      customFieldValues: customFieldValues as Prisma.InputJsonValue | undefined,
+      versionHistory: versionHistory as Prisma.InputJsonValue | undefined,
+      effectiveDate: input.effectiveDate ? new Date(input.effectiveDate) : null,
+      reviewDate: input.reviewDate ? new Date(input.reviewDate) : null,
+      organizationId: request.tenant.organizationId,
+      createdBy: request.tenant.userId,
+      updatedBy: request.tenant.userId,
+    } });
+    return reply.code(201).send(policy);
+  });
+  app.patch("/policies/:id", async (request, reply) => {
+    requireManager(request);
+    const { id } = z.object({ id: z.uuid() }).parse(request.params);
+    const input = policyWriteSchema.extend({ name: z.string().min(2).max(255).optional(), versionLabel: z.string().max(30).optional(), status: z.enum(["DRAFT", "ACTIVE", "ARCHIVED"]).optional(), version: z.number().int().positive() }).parse(request.body);
+    const current = await prisma.policy.findFirst({ where: { id, organizationId: request.tenant.organizationId } });
+    if (!current) throw notFound("Policy");
+    if (current.version !== input.version) return reply.code(409).send({ code: "VERSION_CONFLICT", current });
+    const { version: _, effectiveDate, reviewDate, document, customFieldValues, versionHistory, ...updates } = input;
+    return prisma.policy.update({ where: { id }, data: {
+      ...updates,
+      document: document as Prisma.InputJsonValue | undefined,
+      customFieldValues: customFieldValues as Prisma.InputJsonValue | undefined,
+      versionHistory: versionHistory as Prisma.InputJsonValue | undefined,
+      effectiveDate: effectiveDate ? new Date(effectiveDate) : effectiveDate,
+      reviewDate: reviewDate ? new Date(reviewDate) : reviewDate,
+      updatedBy: request.tenant.userId,
+      version: { increment: 1 },
+    } });
+  });
   app.put("/policies/:id/assignments", async request => { requireManager(request); const { id } = z.object({ id: z.uuid() }).parse(request.params); const { employeeIds } = z.object({ employeeIds: z.array(z.uuid()).max(1000) }).parse(request.body); const policy = await prisma.policy.findFirst({ where: { id, organizationId: request.tenant.organizationId } }); if (!policy) throw notFound("Policy"); const count = await prisma.employee.count({ where: { id: { in: employeeIds }, organizationId: request.tenant.organizationId } }); if (count !== employeeIds.length) throw Object.assign(new Error("Invalid employee assignment"), { statusCode: 400 }); await prisma.$transaction([prisma.policyAssignment.deleteMany({ where: { policyId: id, employeeId: { notIn: employeeIds } } }), ...employeeIds.map(employeeId => prisma.policyAssignment.upsert({ where: { policyId_employeeId: { policyId: id, employeeId } }, create: { policyId: id, employeeId, assignedBy: request.tenant.userId }, update: {} }))]); return { assigned: employeeIds.length }; });
   app.post("/policy-assignments/:id/acknowledge", async request => { const { id } = z.object({ id: z.uuid() }).parse(request.params); const assignment = await prisma.policyAssignment.findFirst({ where: { id, policy: { organizationId: request.tenant.organizationId } } }); if (!assignment) throw notFound("Policy assignment"); return prisma.$transaction(async tx => { const updated = await tx.policyAssignment.update({ where: { id }, data: { acknowledgedAt: new Date(), acknowledgedBy: request.tenant.userId } }); await tx.activityEvent.create({ data: { organizationId: request.tenant.organizationId, actorUserId: request.tenant.userId, action: "policy.acknowledged", entityType: "policy", entityId: assignment.policyId, metadata: { employeeId: assignment.employeeId } } }); return updated; }); });
   app.delete("/policy-assignments/:id/acknowledgement", async request => { requireManager(request); const { id } = z.object({ id: z.uuid() }).parse(request.params); const assignment = await prisma.policyAssignment.findFirst({ where: { id, policy: { organizationId: request.tenant.organizationId } } }); if (!assignment) throw notFound("Policy assignment"); return prisma.policyAssignment.update({ where: { id }, data: { acknowledgedAt: null, acknowledgedBy: null } }); });
@@ -82,6 +118,17 @@ export async function peopleRoutes(app: FastifyInstance) {
   app.post("/training-assignments/:id/complete", async request => { const { id } = z.object({ id: z.uuid() }).parse(request.params); const assignment = await trainingAssignmentForUser(id, request); return prisma.$transaction(async tx => { const updated = await tx.trainingAssignment.update({ where: { id }, data: { status: "COMPLETED", completedAt: new Date(), completedBy: request.tenant.userId } }); await tx.activityEvent.create({ data: { organizationId: request.tenant.organizationId, actorUserId: request.tenant.userId, action: "training.completed", entityType: "training_course", entityId: assignment.courseId, metadata: { employeeId: assignment.employeeId } } }); return updated; }); });
   app.delete("/training-assignments/:id/completion", async request => { const { id } = z.object({ id: z.uuid() }).parse(request.params); await trainingAssignmentForUser(id, request); return prisma.trainingAssignment.update({ where: { id }, data: { status: "ASSIGNED", completedAt: null, completedBy: null } }); });
 }
+
+const policyWriteSchema = z.object({
+  description: z.string().max(5000).optional(),
+  ownerName: z.string().max(120).optional(),
+  effectiveDate: z.iso.datetime().nullable().optional(),
+  reviewDate: z.iso.datetime().nullable().optional(),
+  document: z.record(z.string(), z.any()).nullable().optional(),
+  customFieldValues: z.record(z.string(), z.any()).nullable().optional(),
+  versionHistory: z.array(z.record(z.string(), z.any())).max(500).optional(),
+  requireReacknowledgement: z.boolean().optional(),
+});
 
 function requireManager(request: FastifyRequest) { if (!managers.has(request.tenant.role)) throw Object.assign(new Error("Your role cannot manage people workflows"), { statusCode: 403 }); }
 function notFound(entity: string) { return Object.assign(new Error(`${entity} not found`), { statusCode: 404 }); }

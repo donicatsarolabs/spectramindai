@@ -43,7 +43,7 @@ function AuditCenter({ activeFramework }) {
   }, [activeFramework, audit.findings]);
 
   const findings = useMemo(
-    () => (isApiEnabled && apiFindings.length ? apiFindings : audit.findings || []),
+    () => (isApiEnabled ? apiFindings : audit.findings || []),
     [apiFindings, audit.findings],
   );
   const filtered = useMemo(() => {

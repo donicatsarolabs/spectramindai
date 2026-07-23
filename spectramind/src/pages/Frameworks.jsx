@@ -15,11 +15,29 @@ export default function Frameworks() {
     setActiveFramework,
     addToCart,
     cartFrameworks,
+    isLoadingFrameworks,
+    frameworkLoadError,
   } = useFrameworkWorkspace();
+
+  if (isLoadingFrameworks) {
+    return (
+      <AppShell>
+        <div className="rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-amber-200 border-t-amber-700" />
+          <p className="mt-4 font-semibold text-slate-700">Loading selected frameworks from your organization…</p>
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell>
       <div className="space-y-6">
+        {frameworkLoadError && (
+          <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 font-semibold text-rose-800">
+            {frameworkLoadError}. Refresh the page to retry.
+          </div>
+        )}
         <div>
           <p className="text-sm font-bold uppercase tracking-widest text-blue-600 dark:text-blue-300">
             Compliance

@@ -55,7 +55,11 @@ export async function organizationRoutes(app: FastifyInstance) {
     tenantApp.get("/organizations/current", async request => prisma.organization.findUnique({ where: { id: request.tenant.organizationId } }));
     tenantApp.patch("/organizations/current", async request => {
       requireManager(request);
-      const input = z.object({ name: z.string().trim().min(2).max(120).optional(), contactEmail: emailSchema.optional() }).parse(request.body);
+      const input = z.object({
+        name: z.string().trim().min(2).max(120).optional(),
+        contactEmail: emailSchema.optional(),
+        logoDataUrl: z.string().max(2_500_000).refine(value => !value || /^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(value), "Logo must be a base64 image data URL").optional(),
+      }).parse(request.body);
       return prisma.organization.update({ where: { id: request.tenant.organizationId }, data: input });
     });
 

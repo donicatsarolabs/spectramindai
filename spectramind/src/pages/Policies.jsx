@@ -36,6 +36,7 @@ import { buildCrossModuleTarget } from "../navigation/crossModuleNavigation";
 import { useEffect } from "react";
 import { isApiEnabled } from "../api/client";
 import { acknowledgePolicy, assignPolicy, createPolicyApi, listEmployees, resetPolicyAcknowledgement, synchronizePolicies, updatePolicyApi } from "../api/people";
+import { loadApiWorkspace, saveApiWorkspaceItem } from "../api/workspace";
 
 const POLICY_FIELDS_KEY = "spectramind:policy-fields";
 const DEFAULT_POLICY_FIELDS = [
@@ -166,8 +167,8 @@ function PoliciesContent({ activeFramework }) {
     if (!isApiEnabled || isCMMCWorkspace) return;
     let cancelled = false;
     const frameworkId = resolveFrameworkId(activeFramework.id) || activeFramework.id;
-    Promise.all([listEmployees(), synchronizePolicies(frameworkId)])
-      .then(([employeeRecords, policies]) => {
+    Promise.all([listEmployees(), synchronizePolicies(frameworkId), loadApiWorkspace(frameworkId)])
+      .then(([employeeRecords, policies, workspace]) => {
         if (cancelled) return;
         const mappedEmployees = employeeRecords.map((employee) => ({ ...employee, role: employee.jobRole || "User", type: employee.employmentType || "Full-Time" }));
         const mappedPolicies = policies.map((policy) => fromApiPolicy(policy, activeFramework));
@@ -176,6 +177,9 @@ function PoliciesContent({ activeFramework }) {
         setPolicyAssignments(Object.fromEntries(policies.map((policy) => [policy.id, policy.assignments.map((assignment) => assignment.employeeId)])));
         setAcknowledgementsState(Object.fromEntries(policies.map((policy) => [policy.id, Object.fromEntries(policy.assignments.filter((assignment) => assignment.acknowledgedAt).map((assignment) => [assignment.employeeId, { acknowledgedAt: assignment.acknowledgedAt }]))])));
         setAssignmentIds(Object.fromEntries(policies.flatMap((policy) => policy.assignments.map((assignment) => [`${policy.id}:${assignment.employeeId}`, assignment.id]))));
+        if (Array.isArray(workspace?.["__policy_fields"]?.fields)) {
+          setPolicyFields(workspace["__policy_fields"].fields);
+        }
       })
       .catch((error) => { if (!cancelled) setApiError(error.message || "Could not load policies"); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -200,9 +204,15 @@ function PoliciesContent({ activeFramework }) {
 
   const persistPolicyFields = (nextFields) => {
     setPolicyFields(nextFields);
-    writeScopedJson(policyFieldsStorageKey(activeFramework.id), nextFields, {
-      eventName: "spectramind:policy-fields-updated",
-    });
+    if (isApiEnabled) {
+      const frameworkId = resolveFrameworkId(activeFramework.id) || activeFramework.id;
+      saveApiWorkspaceItem(frameworkId, "__policy_fields", { fields: nextFields }, undefined, "policy_fields")
+        .catch((error) => setApiError(error.message || "Could not save policy fields"));
+    } else {
+      writeScopedJson(policyFieldsStorageKey(activeFramework.id), nextFields, {
+        eventName: "spectramind:policy-fields-updated",
+      });
+    }
   };
 
   const handleToggleAcknowledgement = async (policyId, employeeId) => {
@@ -295,7 +305,17 @@ function PoliciesContent({ activeFramework }) {
     let newPolicy = nextLibrary[nextLibrary.length - 1];
     if (isApiEnabled) {
       try {
-        const created = await createPolicyApi({ frameworkId: resolveFrameworkId(activeFramework.id) || activeFramework.id, name: newPolicy.name, description: newPolicy.description, ownerName: newPolicy.owner, versionLabel: newPolicy.version });
+        const created = await createPolicyApi({
+          frameworkId: resolveFrameworkId(activeFramework.id) || activeFramework.id,
+          name: newPolicy.name,
+          description: newPolicy.description,
+          ownerName: newPolicy.owner,
+          versionLabel: newPolicy.version,
+          document: newPolicy.document,
+          customFieldValues: newPolicy.customFieldValues,
+          versionHistory: newPolicy.versionHistory,
+          requireReacknowledgement: newPolicy.requireReacknowledgement,
+        });
         newPolicy = fromApiPolicy({ ...created, assignments: [] }, activeFramework);
         nextLibrary = [...nextLibrary.slice(0, -1), newPolicy];
       } catch (error) { setApiError(error.message || "Could not create policy"); return; }
@@ -1731,6 +1751,13 @@ function fromApiPolicy(policy, activeFramework) {
   const date = (value) => value ? new Date(value).toISOString().slice(0, 10) : "";
   const statuses = { DRAFT: "Draft", ACTIVE: "Active", ARCHIVED: "Archived" };
   const predefinedPolicyIds = new Set((getFrameworkLibrary(activeFramework.id)?.policies || []).map((item) => item.id));
+  const sourcePolicy = (getFrameworkLibrary(activeFramework.id)?.policies || []).find((item) => item.id === policy.sourcePolicyId);
+  const defaultDocument = buildDefaultPolicyDocument({
+    title: policy.name,
+    name: policy.name,
+    description: policy.description || sourcePolicy?.description || "",
+    relatedControls: sourcePolicy?.relatedControls || sourcePolicy?.linkedControls || [],
+  }, activeFramework.shortName || activeFramework.name);
   return {
     id: policy.id,
     name: policy.name,
@@ -1741,11 +1768,11 @@ function fromApiPolicy(policy, activeFramework) {
     owner: policy.ownerName || "Unassigned",
     effectiveDate: date(policy.effectiveDate),
     reviewDate: date(policy.reviewDate),
-    customFieldValues: {},
-    document: null,
+    customFieldValues: policy.customFieldValues || {},
+    document: policy.document || defaultDocument,
     status: statuses[policy.status] || "Draft",
-    requireReacknowledgement: true,
-    versionHistory: [],
+    requireReacknowledgement: policy.requireReacknowledgement ?? true,
+    versionHistory: Array.isArray(policy.versionHistory) ? policy.versionHistory : [],
     custom: policy.custom ?? !predefinedPolicyIds.has(policy.id),
     apiAssignments: policy.assignments || [],
   };
@@ -1760,6 +1787,10 @@ function policyUpdatesForApi(updates) {
   if (updates.effectiveDate !== undefined) result.effectiveDate = policyDateToIso(updates.effectiveDate);
   if (updates.reviewDate !== undefined) result.reviewDate = policyDateToIso(updates.reviewDate);
   if (updates.status !== undefined) result.status = { Draft: "DRAFT", Active: "ACTIVE", Archived: "ARCHIVED" }[updates.status] || updates.status;
+  if (updates.document !== undefined) result.document = updates.document;
+  if (updates.customFieldValues !== undefined) result.customFieldValues = updates.customFieldValues;
+  if (updates.versionHistory !== undefined) result.versionHistory = updates.versionHistory;
+  if (updates.requireReacknowledgement !== undefined) result.requireReacknowledgement = updates.requireReacknowledgement;
   return result;
 }
 

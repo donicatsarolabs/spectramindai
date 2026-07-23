@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   CMMC_ACTIVITY_EVENT,
+  hydrateCMMCActivityHistory,
   loadCMMCActivityHistory,
 } from "../services/cmmcActivityHistoryService";
 
@@ -9,6 +10,7 @@ export function useCMMCActivityHistory() {
 
   useEffect(() => {
     const refreshActivities = () => setActivities(loadCMMCActivityHistory());
+    hydrateCMMCActivityHistory().catch(() => {});
 
     window.addEventListener(CMMC_ACTIVITY_EVENT, refreshActivities);
     window.addEventListener("spectramind:session-updated", refreshActivities);

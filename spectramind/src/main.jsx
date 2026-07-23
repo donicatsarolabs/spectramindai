@@ -7,6 +7,7 @@ import { UserProvider } from "./auth/UserContext";
 import { ComplianceStateProvider } from "./compliance/ComplianceStateContext";
 import { FrameworkWorkspaceProvider } from "./framework/FrameworkWorkspaceContext";
 import "./index.css";
+import ApiConfigurationGuard from "./components/ApiConfigurationGuard";
 
 document.documentElement.classList.remove("dark");
 localStorage.removeItem("darkMode");
@@ -16,13 +17,15 @@ ReactDOM.createRoot(
 ).render(
   <React.StrictMode>
     <BrowserRouter>
-      <UserProvider>
-        <FrameworkWorkspaceProvider>
-          <ComplianceStateProvider>
-            <App />
-          </ComplianceStateProvider>
-        </FrameworkWorkspaceProvider>
-      </UserProvider>
+      <ApiConfigurationGuard>
+        <UserProvider>
+          <FrameworkWorkspaceProvider>
+            <ComplianceStateProvider>
+              <App />
+            </ComplianceStateProvider>
+          </FrameworkWorkspaceProvider>
+        </UserProvider>
+      </ApiConfigurationGuard>
     </BrowserRouter>
   </React.StrictMode>
 );

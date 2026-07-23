@@ -38,11 +38,36 @@ const SETUP_BANNER_DISMISSED_KEY = "spectramind:workspace-setup-banner-dismissed
 
 export default function Dashboard() {
   const { user } = useUser();
-  const { activeFramework, selectedFrameworks } = useFrameworkWorkspace();
+  const { activeFramework, selectedFrameworks, isLoadingFrameworks, frameworkLoadError } = useFrameworkWorkspace();
   const setupIncomplete = !user?.organizationId || !user?.onboardingComplete;
 
   if (setupIncomplete) {
     return <DashboardSetupPrompt user={user} />;
+  }
+
+  if (isLoadingFrameworks) {
+    return (
+      <AppShell>
+        <div className="rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-amber-200 border-t-amber-700" />
+          <p className="mt-4 font-semibold text-slate-700">Loading your organization workspace…</p>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (frameworkLoadError) {
+    return (
+      <AppShell>
+        <div className="rounded-xl border border-rose-200 bg-white p-8 text-center shadow-sm">
+          <h1 className="text-2xl font-black text-slate-950">Workspace could not be loaded</h1>
+          <p className="mt-3 text-slate-600">{frameworkLoadError}</p>
+          <button type="button" onClick={() => window.location.reload()} className="mt-5 rounded-lg bg-primary px-5 py-3 font-semibold text-white">
+            Try again
+          </button>
+        </div>
+      </AppShell>
+    );
   }
 
   if (!selectedFrameworks.length) {

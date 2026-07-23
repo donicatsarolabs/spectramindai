@@ -1,5 +1,7 @@
 import { apiRequest, getApiSession, persistApiSession } from "./client";
 
+export const getCurrentOrganization = () => apiRequest("/api/v1/organizations/current");
+export const updateCurrentOrganization = input => apiRequest("/api/v1/organizations/current", { method: "PATCH", body: JSON.stringify(input) });
 export async function createOrganization(input) {
   const organization = await apiRequest("/api/v1/organizations", { method: "POST", body: JSON.stringify(input) });
   const session = getApiSession();

@@ -390,7 +390,6 @@ function useApiQuestionnaire(frameworkId) {
         const sourceAnswers = snapshot.run?.id === draft.id ? snapshot.run.answers || [] : [];
         const nextResponses = Object.fromEntries(sourceAnswers.map((answer) => [answer.questionId, answer.value]));
         setResponses(nextResponses);
-        saveOrgQuestionnaireAnswers(nextResponses, frameworkId);
       })
       .catch((requestError) => {
         if (!cancelled) setError(requestError.message || "Could not load questionnaire");
@@ -402,7 +401,7 @@ function useApiQuestionnaire(frameworkId) {
   const updateResponse = useCallback((key, value) => {
     setResponses((current) => {
       const nextResponses = { ...current, [key]: value };
-      saveOrgQuestionnaireAnswers(nextResponses, frameworkId);
+      if (!isApiEnabled) saveOrgQuestionnaireAnswers(nextResponses, frameworkId);
       return nextResponses;
     });
     if (isApiEnabled && runId) {

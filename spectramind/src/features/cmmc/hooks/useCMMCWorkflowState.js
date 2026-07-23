@@ -17,6 +17,7 @@ const CMMC_SPRS_EVENT = "spectramind:cmmc-sprs-updated";
 export const CMMC_CONTROL_STATUS_VALIDATION_EVENT = "spectramind:cmmc-control-status-validation-failed";
 const EVIDENCE_WORKFLOW_FIELDS_KEY = "__cmmcEvidenceWorkflowFields";
 const CONTROL_WORKFLOW_FIELDS_KEY = "__cmmcControlWorkflowFields";
+const SCOPE_WORKSPACE_ITEM_ID = "__cmmc_scope_answers";
 const EVIDENCE_WORKFLOW_FIELDS = [
   "evidenceStatus",
   "ownerCollector",
@@ -57,12 +58,12 @@ export function getCMMCWorkflowState(scopeAnswers = loadCMMCScopeAnswers()) {
 }
 
 export function useCMMCWorkflowState() {
-  const [scopeAnswers, setScopeAnswers] = useState(() => loadCMMCScopeAnswers());
+  const [scopeAnswers, setScopeAnswers] = useState(() => hasApiSession() ? {} : loadCMMCScopeAnswers());
 
   useEffect(() => {
     let cancelled = false;
     const refreshScopeAnswers = () => {
-      const localAnswers = loadCMMCScopeAnswers();
+      const localAnswers = hasApiSession() ? {} : loadCMMCScopeAnswers();
       setScopeAnswers(localAnswers);
 
       if (!hasApiSession()) return;
@@ -92,14 +93,19 @@ export function useCMMCWorkflowState() {
   }, []);
 
   const updateScopeAnswers = useCallback((updater) => {
-    const currentAnswers = loadCMMCScopeAnswers();
-    const nextAnswers =
-      typeof updater === "function" ? updater(currentAnswers) : updater;
-    const savedAnswers = saveCMMCScopeAnswers(nextAnswers);
+    const currentAnswers = scopeAnswers;
+    const nextAnswers = typeof updater === "function" ? updater(currentAnswers) : updater;
+    const savedAnswers = normalizeAnswers(nextAnswers);
     recordScopeAnswerActivities(currentAnswers, savedAnswers);
     setScopeAnswers(savedAnswers);
+    if (hasApiSession()) {
+      saveApiWorkspaceItem(CMMC_FRAMEWORK_ID, SCOPE_WORKSPACE_ITEM_ID, { answers: savedAnswers }, undefined, "questionnaire")
+        .catch(() => setScopeAnswers(currentAnswers));
+    } else {
+      saveCMMCScopeAnswers(savedAnswers);
+    }
     return savedAnswers;
-  }, []);
+  }, [scopeAnswers]);
 
   const updateScopeAnswer = useCallback(
     (answerId, value) =>
@@ -391,6 +397,7 @@ function hasApiSession() {
 }
 
 function mergeApiWorkspaceAnswers(answers = {}, workspaceData = {}) {
+  const persistedScopeAnswers = workspaceData?.[SCOPE_WORKSPACE_ITEM_ID]?.answers;
   const apiFields = buildApiWorkflowFields(workspaceData);
   const controlFields = {
     ...getCMMCControlWorkflowFields(answers),
@@ -403,6 +410,7 @@ function mergeApiWorkspaceAnswers(answers = {}, workspaceData = {}) {
 
   return normalizeAnswers({
     ...answers,
+    ...(persistedScopeAnswers && typeof persistedScopeAnswers === "object" ? persistedScopeAnswers : {}),
     ...(Object.keys(controlFields).length ? { [CONTROL_WORKFLOW_FIELDS_KEY]: controlFields } : {}),
     ...(Object.keys(evidenceFields).length ? { [EVIDENCE_WORKFLOW_FIELDS_KEY]: evidenceFields } : {}),
   });

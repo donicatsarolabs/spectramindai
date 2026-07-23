@@ -1,7 +1,9 @@
 import { UploadCloud, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useUser } from "../auth/UserContext";
 import { writeScopedJson } from "../auth/session";
+import { isApiEnabled } from "../api/client";
+import { getCurrentOrganization, updateCurrentOrganization } from "../api/organizations";
 import AppShell from "../components/layout/AppShell";
 import {
   APP_NAME,
@@ -16,6 +18,16 @@ export default function Settings() {
   const [organizationName, setOrganizationName] = useState(user?.organizationName || APP_NAME);
   const [contactEmail, setContactEmail] = useState(user?.contactEmail || user?.email || "");
   const [saved, setSaved] = useState(false);
+  const [logoValue, setLogoValue] = useState(organizationLogo);
+
+  useEffect(() => {
+    if (!isApiEnabled) return;
+    getCurrentOrganization().then((organization) => {
+      setOrganizationName(organization.name || APP_NAME);
+      setContactEmail(organization.contactEmail || "");
+      setLogoValue(organization.logoDataUrl || "");
+    }).catch((error) => setUploadError(error.message || "Could not load organization settings."));
+  }, []);
 
   const handleLogoUpload = (event) => {
     const input = event.currentTarget;
@@ -34,7 +46,9 @@ export default function Settings() {
     const reader = new FileReader();
 
     reader.onload = () => {
-      saveOrganizationLogo(String(reader.result || ""));
+      const value = String(reader.result || "");
+      setLogoValue(value);
+      saveOrganizationLogo(value);
       setUploadError("");
       input.value = "";
     };
@@ -48,6 +62,7 @@ export default function Settings() {
   };
 
   const handleRemoveLogo = () => {
+    setLogoValue("");
     saveOrganizationLogo("");
     setUploadError("");
   };
@@ -78,9 +93,9 @@ export default function Settings() {
               <div className="flex flex-col gap-4 rounded-lg border border-slate-200 bg-[#fffdf8]/72 p-4 dark:border-slate-800 dark:bg-slate-950 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-4">
                   <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-lg border border-blue-600/25 bg-blue-600 text-xl font-black text-white shadow-sm">
-                    {organizationLogo ? (
+                    {logoValue ? (
                       <img
-                        src={organizationLogo}
+                        src={logoValue}
                         alt="Organization logo preview"
                         className="h-full w-full bg-white object-contain p-1"
                       />
@@ -90,10 +105,10 @@ export default function Settings() {
                   </div>
                   <div>
                     <p className="text-sm font-black text-slate-900 dark:text-white">
-                      {organizationLogo ? "Custom logo active" : `${APP_NAME} default logo`}
+                      {logoValue ? "Custom logo active" : `${APP_NAME} default logo`}
                     </p>
                     <p className="mt-1 text-sm font-semibold text-slate-500 dark:text-slate-400">
-                      Stored locally for this browser.
+                      {isApiEnabled ? "Shared securely with this organization." : "Stored locally for this development browser."}
                     </p>
                   </div>
                 </div>
@@ -109,7 +124,7 @@ export default function Settings() {
                       onChange={handleLogoUpload}
                     />
                   </label>
-                  {organizationLogo && (
+                  {logoValue && (
                     <button
                       type="button"
                       onClick={handleRemoveLogo}
@@ -130,7 +145,23 @@ export default function Settings() {
           </div>
 
           {saved && <p className="mt-4 text-sm font-semibold text-emerald-700">Organization settings saved.</p>}
-          <button onClick={() => { const next = { organizationName: organizationName.trim(), contactEmail: contactEmail.trim() }; updateUser(next); writeScopedJson("spectramind:organization-profile", next); setSaved(true); }} className="mt-6 rounded-lg bg-primary px-5 py-3 font-semibold text-white transition hover:bg-blue-700">
+          <button onClick={async () => {
+            const next = { organizationName: organizationName.trim(), contactEmail: contactEmail.trim() };
+            try {
+              if (isApiEnabled) {
+                await updateCurrentOrganization({ name: next.organizationName, contactEmail: next.contactEmail, logoDataUrl: logoValue });
+              } else {
+                writeScopedJson("spectramind:organization-profile", next);
+              }
+              updateUser(next);
+              saveOrganizationLogo(logoValue);
+              setSaved(true);
+              setUploadError("");
+            } catch (error) {
+              setSaved(false);
+              setUploadError(error.message || "Could not save organization settings.");
+            }
+          }} className="mt-6 rounded-lg bg-primary px-5 py-3 font-semibold text-white transition hover:bg-blue-700">
             Save Changes
           </button>
         </section>

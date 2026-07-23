@@ -4,6 +4,8 @@ const API_URL = String(import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
 const API_SESSION_KEY = "spectramind:api-session";
 
 export const isApiEnabled = Boolean(API_URL);
+export const isLocalFallbackEnabled = !isApiEnabled && Boolean(import.meta.env.DEV);
+export const hasApiConfigurationError = !isApiEnabled && Boolean(import.meta.env.PROD);
 
 export function getApiSession() {
   if (!isApiEnabled || typeof window === "undefined") return null;

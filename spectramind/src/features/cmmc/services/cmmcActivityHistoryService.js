@@ -1,7 +1,12 @@
 import { readScopedJson, writeScopedJson } from "../../../auth/session";
+import { isApiEnabled } from "../../../api/client";
+import { loadApiWorkspace, saveApiWorkspaceItem } from "../../../api/workspace";
+import { CMMC_FRAMEWORK_ID } from "../../../core/engines/framework-engine/frameworkRegistry";
 
 const STORAGE_KEY = "spectramind:cmmc-activity-history";
 const MAX_ACTIVITY_ENTRIES = 500;
+const ACTIVITY_WORKSPACE_ITEM_ID = "__cmmc_activity_history";
+let apiActivityHistory = [];
 
 export const CMMC_ACTIVITY_EVENT = "spectramind:cmmc-activity-updated";
 
@@ -18,7 +23,16 @@ export const CMMC_ACTIVITY_TYPES = {
 };
 
 export function loadCMMCActivityHistory() {
+  if (isApiEnabled) return apiActivityHistory;
   return normalizeActivityHistory(readScopedJson(STORAGE_KEY, [], { scope: "organization" }));
+}
+
+export async function hydrateCMMCActivityHistory() {
+  if (!isApiEnabled) return loadCMMCActivityHistory();
+  const workspace = await loadApiWorkspace(CMMC_FRAMEWORK_ID);
+  apiActivityHistory = normalizeActivityHistory(workspace?.[ACTIVITY_WORKSPACE_ITEM_ID]?.activities || []);
+  window.dispatchEvent(new Event(CMMC_ACTIVITY_EVENT));
+  return apiActivityHistory;
 }
 
 export function recordCMMCActivity(activity) {
@@ -34,10 +48,17 @@ export function recordCMMCActivities(activities = []) {
 
   const history = loadCMMCActivityHistory();
   const nextHistory = [...nextActivities, ...history].slice(0, MAX_ACTIVITY_ENTRIES);
-  writeScopedJson(STORAGE_KEY, nextHistory, {
-    scope: "organization",
-    eventName: CMMC_ACTIVITY_EVENT,
-  });
+  if (isApiEnabled) {
+    apiActivityHistory = nextHistory;
+    saveApiWorkspaceItem(CMMC_FRAMEWORK_ID, ACTIVITY_WORKSPACE_ITEM_ID, { activities: nextHistory }, undefined, "activity_history")
+      .catch(() => {});
+    window.dispatchEvent(new Event(CMMC_ACTIVITY_EVENT));
+  } else {
+    writeScopedJson(STORAGE_KEY, nextHistory, {
+      scope: "organization",
+      eventName: CMMC_ACTIVITY_EVENT,
+    });
+  }
 
   return nextActivities;
 }
