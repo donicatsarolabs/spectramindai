@@ -27,7 +27,10 @@ export async function requireTenant(request: FastifyRequest) {
   });
 
   if (!membership) {
-    throw Object.assign(new Error("You do not have access to this organization"), { statusCode: 403 });
+    throw Object.assign(new Error("Your access to this organization has been removed"), {
+      statusCode: 403,
+      code: "TENANT_ACCESS_REVOKED",
+    });
   }
 
   request.tenant = {

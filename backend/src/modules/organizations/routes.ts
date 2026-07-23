@@ -85,13 +85,18 @@ export async function organizationRoutes(app: FastifyInstance) {
       if (!invitation) return reply.code(404).send({ code: "INVITATION_NOT_FOUND", message: "Pending invitation not found" });
       await prisma.$transaction(async tx => {
         await tx.organizationInvitation.update({ where: { id }, data: { status: "REVOKED", revokedAt: new Date() } });
-        // A pending invitation has no joined membership yet. Remove its provisional
-        // employee row as well so it disappears from the employee table.
-        await tx.employee.deleteMany({
+        // Keep the employee record and its assignments so the manager can invite
+        // the same person again later. Only workspace access is revoked.
+        await tx.employee.updateMany({
           where: {
             organizationId: request.tenant.organizationId,
             email: invitation.email.toLowerCase(),
             membershipId: null,
+          },
+          data: {
+            hasAccess: false,
+            updatedBy: request.tenant.userId,
+            version: { increment: 1 },
           },
         });
         await tx.activityEvent.create({

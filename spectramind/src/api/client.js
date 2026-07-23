@@ -25,8 +25,9 @@ export function clearApiSession() {
   window.sessionStorage.removeItem(API_SESSION_KEY);
 }
 
-function clearExpiredSession(response, apiSession) {
-  if (response.status !== 401 || !apiSession?.token) return;
+function clearInvalidSession(response, body, apiSession) {
+  const accessWasRevoked = response.status === 403 && body?.code === "TENANT_ACCESS_REVOKED";
+  if ((response.status !== 401 && !accessWasRevoked) || !apiSession?.token) return;
   clearApiSession();
   clearStoredSession();
 }
@@ -42,7 +43,7 @@ export async function apiRequest(path, options = {}) {
   const response = await fetch(`${API_URL}${path}`, { ...options, headers });
   const body = response.status === 204 ? null : await response.json().catch(() => null);
   if (!response.ok) {
-    clearExpiredSession(response, apiSession);
+    clearInvalidSession(response, body, apiSession);
     const error = new Error(body?.message || `Request failed with status ${response.status}`);
     error.status = response.status;
     error.code = body?.code;
@@ -63,8 +64,8 @@ export async function apiRequestRaw(path, options = {}) {
   if (apiSession?.organizationId) headers.set("x-organization-id", apiSession.organizationId);
   const response = await fetch(`${API_URL}${path}`, { ...options, headers });
   if (!response.ok) {
-    clearExpiredSession(response, apiSession);
     const body = await response.json().catch(() => null);
+    clearInvalidSession(response, body, apiSession);
     throw new Error(body?.message || `Request failed with status ${response.status}`);
   }
   return response;

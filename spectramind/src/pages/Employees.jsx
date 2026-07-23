@@ -14,7 +14,7 @@ import {
 } from "../training/TrainingService";
 import { POLICY_STATUS_KEY } from "../policies/PolicyService";
 import { isApiEnabled } from "../api/client";
-import { completeBackgroundCheck, createEmployee, deleteEmployee, listEmployees, updateEmployee } from "../api/people";
+import { completeBackgroundCheck, createEmployee, deleteEmployee, listEmployees, revokeEmployeeAccess, updateEmployee } from "../api/people";
 import { changeMemberRole, createInvitation, revokeInvitation } from "../api/organizations";
 import { useFrameworkWorkspace } from "../framework/FrameworkWorkspaceContext";
 
@@ -104,15 +104,7 @@ export default function Employees() {
     listEmployees()
       .then((records) => {
         if (cancelled) return;
-        const mapped = records.map(fromApiEmployee).map((employee) => {
-          const invitation = employee.pendingInvitation;
-          return invitation ? {
-            ...employee,
-            employeeStatus: "Invited",
-            invitationId: invitation.id,
-            tags: [...new Set([...(employee.tags || []), "Invited"])],
-          } : employee;
-        });
+        const mapped = records.map(fromApiEmployee);
         setEmployees(mapped);
         setBgChecksState(Object.fromEntries(mapped.map((employee) => [employee.name, employee.backgroundCheckCompletedAt ? "Completed" : "Pending"])));
       })
@@ -278,9 +270,28 @@ export default function Employees() {
       } else {
         revokeLocalInvitation({ email: employee.email, organizationId: user.organizationId });
       }
-      setEmployees((current) => current.filter((item) => item.id !== employee.id));
-      setActionNotice(`Invitation and provisional employee removed for ${employee.email}.`);
+      setEmployees((current) => current.map((item) => item.id === employee.id ? {
+        ...item,
+        employeeStatus: "No access",
+        invitationId: null,
+        pendingInvitation: null,
+        hasAccess: false,
+        tags: (item.tags || []).filter((tag) => tag !== "Invited"),
+      } : item));
+      setActionNotice(`Invitation removed. ${employee.email} no longer has workspace access and can be invited again.`);
     } catch (error) { setApiError(error.message || "Could not remove this invitation."); }
+  };
+
+  const handleRemoveAccess = async (employee) => {
+    if (!canRemoveEmployee(employee)) return;
+    setApiError("");
+    try {
+      const updated = isApiEnabled
+        ? fromApiEmployee(await revokeEmployeeAccess(employee.id))
+        : { ...employee, membershipId: null, hasAccess: false, employeeStatus: "No access" };
+      setEmployees((current) => current.map((item) => item.id === employee.id ? updated : item));
+      setActionNotice(`${employee.email} no longer has workspace access. Their existing evidence has been retained.`);
+    } catch (error) { setApiError(error.message || "Could not remove workspace access."); }
   };
 
   const canRemoveEmployee = (employee) => {
@@ -679,8 +690,8 @@ export default function Employees() {
                         ))}
                       </td>
                       <td className="whitespace-nowrap px-6 py-4">
-                        <span className="flex items-center gap-1.5 font-bold text-emerald-600">
-                          <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                        <span className={`flex items-center gap-1.5 font-bold ${emp.employeeStatus === "Active" ? "text-emerald-600" : emp.employeeStatus === "Invited" ? "text-amber-700" : "text-slate-500"}`}>
+                          <span className={`h-2 w-2 rounded-full ${emp.employeeStatus === "Active" ? "bg-emerald-500" : emp.employeeStatus === "Invited" ? "bg-amber-500" : "bg-slate-400"}`} />
                           {emp.employeeStatus}
                         </span>
                       </td>
@@ -688,13 +699,13 @@ export default function Employees() {
                         <div className="flex items-center gap-1">
                           <button
                             type="button"
-                            title={emp.employeeStatus === "Invited" ? "Remove pending invitation" : "Invite to workspace"}
-                            disabled={!canManagePeople}
-                            onClick={() => emp.employeeStatus === "Invited" ? handleRevokeInvitation(emp) : handleInviteEmployee(emp)}
-                            className={`inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-black disabled:cursor-not-allowed disabled:text-slate-400 ${emp.employeeStatus === "Invited" ? "text-rose-700 hover:bg-rose-50" : "text-blue-700 hover:bg-blue-50"}`}
+                            title={emp.employeeStatus === "Invited" ? "Remove pending invitation" : emp.membershipId ? "Remove workspace access" : "Send workspace invitation"}
+                            disabled={!canManagePeople || (Boolean(emp.membershipId) && !canRemoveEmployee(emp))}
+                            onClick={() => emp.employeeStatus === "Invited" ? handleRevokeInvitation(emp) : emp.membershipId ? handleRemoveAccess(emp) : handleInviteEmployee(emp)}
+                            className={`inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-black disabled:cursor-not-allowed disabled:text-slate-400 ${emp.employeeStatus === "Invited" || emp.membershipId ? "text-rose-700 hover:bg-rose-50" : "text-blue-700 hover:bg-blue-50"}`}
                           >
                             <Mail size={14} />
-                            {emp.employeeStatus === "Invited" ? "Remove invite" : "Invite"}
+                            {emp.employeeStatus === "Invited" ? "Remove invite" : emp.membershipId ? "Remove access" : "Send invite"}
                           </button>
                           <button
                             type="button"
@@ -966,7 +977,18 @@ function toEmployeeInput(employee) {
 
 function fromApiEmployee(employee) {
   const date = (value) => value ? new Date(value).toISOString().slice(0, 10) : "-";
-  return { ...employee, role: employee.jobRole || employee.role || "User", type: employee.employmentType || employee.type || "Full-Time", startDate: date(employee.startDate), endDate: date(employee.endDate), tags: employee.tags || [], employeeStatus: employee.employeeStatus || "Active" };
+  const invitation = employee.pendingInvitation;
+  const tags = (employee.tags || []).filter((tag) => tag !== "Invited");
+  return {
+    ...employee,
+    role: employee.jobRole || employee.role || "User",
+    type: employee.employmentType || employee.type || "Full-Time",
+    startDate: date(employee.startDate),
+    endDate: date(employee.endDate),
+    tags: invitation ? [...new Set([...tags, "Invited"])] : tags,
+    invitationId: invitation?.id || null,
+    employeeStatus: invitation ? "Invited" : employee.membershipId ? "Active" : "No access",
+  };
 }
 
 function apiRole(role) {

@@ -4,6 +4,7 @@ export const listEmployees = () => isApiEnabled ? apiRequest("/api/v1/employees"
 export const createEmployee = (input) => apiRequest("/api/v1/employees", { method: "POST", body: JSON.stringify(input) });
 export const updateEmployee = (id, version, input) => apiRequest(`/api/v1/employees/${id}`, { method: "PATCH", body: JSON.stringify({ ...input, version }) });
 export const deleteEmployee = (id) => apiRequest(`/api/v1/employees/${id}`, { method: "DELETE" });
+export const revokeEmployeeAccess = (id) => apiRequest(`/api/v1/employees/${id}/access`, { method: "DELETE" });
 export const completeBackgroundCheck = (id) => apiRequest(`/api/v1/employees/${id}/background-check`, { method: "POST" });
 
 export async function synchronizePolicies(frameworkId) {

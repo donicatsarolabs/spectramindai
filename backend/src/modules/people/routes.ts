@@ -29,6 +29,50 @@ export async function peopleRoutes(app: FastifyInstance) {
   });
   app.post("/employees", async (request, reply) => { requireManager(request); const input = employeeInput.parse(request.body); const record = await prisma.$transaction(async tx => { const employee = await tx.employee.create({ data: { ...input, startDate: input.startDate ? new Date(input.startDate) : null, endDate: input.endDate ? new Date(input.endDate) : null, organizationId: request.tenant.organizationId, createdBy: request.tenant.userId, updatedBy: request.tenant.userId } }); await tx.activityEvent.create({ data: { organizationId: request.tenant.organizationId, actorUserId: request.tenant.userId, action: "employee.created", entityType: "employee", entityId: employee.id } }); return employee; }); return reply.code(201).send(record); });
   app.patch("/employees/:id", async (request, reply) => { requireManager(request); const { id } = z.object({ id: z.uuid() }).parse(request.params); const input = employeeInput.partial().extend({ version: z.number().int().positive() }).parse(request.body); const current = await ownedEmployee(id, request.tenant.organizationId); if (current.version !== input.version) return reply.code(409).send({ code: "VERSION_CONFLICT", current }); const { version: _, startDate, endDate, ...updates } = input; return prisma.employee.update({ where: { id }, data: { ...updates, startDate: startDate ? new Date(startDate) : startDate, endDate: endDate ? new Date(endDate) : endDate, updatedBy: request.tenant.userId, version: { increment: 1 } } }); });
+  app.delete("/employees/:id/access", async (request, reply) => {
+    requireManager(request);
+    const { id } = z.object({ id: z.uuid() }).parse(request.params);
+    const employee = await ownedEmployee(id, request.tenant.organizationId);
+
+    if (employee.membershipId) {
+      const membership = await prisma.organizationMembership.findUnique({ where: { id: employee.membershipId } });
+      if (membership?.userId === request.tenant.userId) {
+        return reply.code(409).send({ code: "CANNOT_REMOVE_SELF", message: "You cannot remove your own workspace access" });
+      }
+    }
+
+    const updated = await prisma.$transaction(async tx => {
+      if (employee.membershipId) {
+        await tx.organizationMembership.delete({ where: { id: employee.membershipId } });
+      }
+      await tx.organizationInvitation.updateMany({
+        where: { organizationId: request.tenant.organizationId, email: employee.email.toLowerCase(), status: "PENDING" },
+        data: { status: "REVOKED", revokedAt: new Date() },
+      });
+      const record = await tx.employee.update({
+        where: { id },
+        data: {
+          membershipId: null,
+          hasAccess: false,
+          updatedBy: request.tenant.userId,
+          version: { increment: 1 },
+        },
+      });
+      await tx.activityEvent.create({
+        data: {
+          organizationId: request.tenant.organizationId,
+          actorUserId: request.tenant.userId,
+          action: "employee.access.revoked",
+          entityType: "employee",
+          entityId: id,
+          metadata: { email: employee.email, evidenceRetained: true },
+        },
+      });
+      return record;
+    });
+
+    return updated;
+  });
   app.delete("/employees/:id", async (request, reply) => {
     requireManager(request);
     const { id } = z.object({ id: z.uuid() }).parse(request.params);
