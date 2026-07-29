@@ -23,6 +23,7 @@ const navigationItems = [
   { label: "SPRS Score", path: "/cmmc/sprs-score", icon: BarChart3 },
   { label: "Auditor", path: "/cmmc/auditor", icon: Search },
   { label: "Evidence", path: "/cmmc/evidence", icon: FileText },
+  { label: "Domains", path: "/cmmc/domains", icon: Library, matchPrefix: "/cmmc/domains" },
 ];
 
 const domainOptions = [
@@ -111,6 +112,7 @@ export default function CMMCImplementationLayout({ children }) {
                   const Icon = item.icon;
                   const active =
                     (item.match || [item.path]).includes(location.pathname) ||
+                    (item.matchPrefix && location.pathname.startsWith(item.matchPrefix)) ||
                     (item.label === "Scope" && location.pathname === "/implementation");
 
                   return (

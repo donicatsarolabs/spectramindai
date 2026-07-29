@@ -22,11 +22,15 @@ export default function PolicyDocument() {
   const isCMMC = resolveFrameworkId(activeFramework.id) === CMMC_FRAMEWORK_ID;
   const cmmcPolicies = buildCMMCPolicyDocumentRows({ controlWorkflowFields, evidenceWorkflowFields }).map((row) => ({
     id: row.key,
-    title: row.controlId || row.key,
-    description: row.evidence || row.requirement || "",
+    title: row.title || row.key,
+    description: row.description || row.requirement || "",
     status: row.policyStatus,
-    linkedControls: [row.controlId].filter(Boolean),
+    linkedControls: row.linkedControls || [],
     linkedTests: [],
+    controlRequirement: row.requirement,
+    controlFamily: `${row.domain} - ${row.family}`,
+    evidenceRequests: row.evidenceRequests || [],
+    assessmentGuidance: row.publicNotesUse || "",
   }));
   const sourcePolicies = isCMMC ? cmmcPolicies : frameworkPolicies;
   const [library, setLibrary] = useState(() =>

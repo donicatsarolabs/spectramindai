@@ -1,5 +1,5 @@
-import CMMCModulePlaceholderPage from "./CMMCModulePlaceholderPage";
+import CMMCOperationalModulePage from "./CMMCOperationalModulePage";
 
 export default function CMMCDomainSummaryPage() {
-  return <CMMCModulePlaceholderPage moduleId="domain-summary" />;
+  return <CMMCOperationalModulePage moduleId="domain-summary" />;
 }

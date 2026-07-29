@@ -1,5 +1,5 @@
-import CMMCModulePlaceholderPage from "./CMMCModulePlaceholderPage";
+import { Navigate } from "react-router-dom";
 
 export default function CMMCPoliciesPage() {
-  return <CMMCModulePlaceholderPage moduleId="policy-documents" />;
+  return <Navigate to="/cmmc/evidence?tab=policies" replace />;
 }

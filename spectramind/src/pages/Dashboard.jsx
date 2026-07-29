@@ -25,7 +25,6 @@ import {
   buildCMMCPolicyDocumentMetrics,
   buildCMMCPolicyDocumentRows,
   buildCMMCEvidenceAttachmentStats,
-  exportCMMCExecutiveReportToPDF,
   formatCMMCActivityName,
 } from "../features/cmmc/services";
 import ActiveFrameworkRequired from "../framework/ActiveFrameworkRequired";
@@ -195,7 +194,7 @@ function DashboardContent({ activeFramework, selectedFrameworks }) {
   };
   const cmmcSPRS = useCMMCSPRSCalculation();
   const cmmcActivities = useCMMCActivityHistory();
-  const { workflowState, controlWorkflowFields, evidenceWorkflowFields } = useCMMCWorkflowState();
+  const { controlWorkflowFields, evidenceWorkflowFields } = useCMMCWorkflowState();
   const isCMMCWorkspace = !isApiEnabled && selectedFrameworks.length === 1 && resolveFrameworkId(navigationFramework.id) === CMMC_FRAMEWORK_ID;
   const {
     audit,
@@ -421,16 +420,6 @@ function DashboardContent({ activeFramework, selectedFrameworks }) {
     });
     navigate(target.path, { state: target.state });
   };
-  const exportExecutiveReport = () => {
-    exportCMMCExecutiveReportToPDF({
-      workflowState,
-      sprsMetrics: cmmcSPRS,
-      policyRows: cmmcPolicyRows,
-      policyMetrics: cmmcPolicyMetrics,
-      activityHistory: cmmcActivities,
-    });
-  };
-
   return (
     <AppShell>
       <div className="space-y-6">
@@ -449,12 +438,6 @@ function DashboardContent({ activeFramework, selectedFrameworks }) {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {isCMMCWorkspace && (
-              <button type="button" onClick={exportExecutiveReport} className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-600/35 bg-[linear-gradient(135deg,rgba(255,246,216,.96),rgba(216,180,109,.74)_48%,rgba(168,117,52,.86))] px-5 py-3 font-bold text-slate-900 shadow-lg shadow-blue-600/20 transition hover:-translate-y-0.5">
-                Export Executive Report
-                <ArrowUpRight size={18} />
-              </button>
-            )}
             <button type="button" onClick={navigateToStartReview} className="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-600/35 bg-[linear-gradient(135deg,rgba(255,246,216,.96),rgba(216,180,109,.74)_48%,rgba(168,117,52,.86))] px-5 py-3 font-bold text-slate-900 shadow-lg shadow-blue-600/20 transition hover:-translate-y-0.5">
               Start Review
               <ArrowUpRight size={18} />

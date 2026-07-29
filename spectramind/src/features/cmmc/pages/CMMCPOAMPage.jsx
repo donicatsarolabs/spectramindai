@@ -23,7 +23,9 @@ export default function CMMCPOAMPage() {
   const { controlWorkflowFields, evidenceWorkflowFields } = useCMMCWorkflowState();
   const frameworkName = cmmcLibrary.framework?.name || module.title;
   const workflowPoamRows = useMemo(
-    () => poamRows.map((row) => applyPoamWorkflowFields(row, evidenceWorkflowFields, controlWorkflowFields)),
+    () => poamRows
+      .map((row) => applyPoamWorkflowFields(row, evidenceWorkflowFields, controlWorkflowFields))
+      .filter((row) => !["Completed", "Not Applicable"].includes(row.evidenceStatus)),
     [controlWorkflowFields, evidenceWorkflowFields]
   );
 
@@ -36,7 +38,7 @@ export default function CMMCPOAMPage() {
       <CMMCSectionCard
         title="POA&M framework review"
         description={`${frameworkName} controls and mapped evidence from the framework library.`}
-        actions={<CMMCStatusBadge tone="info">{workflowPoamRows.length} Controls</CMMCStatusBadge>}
+        actions={<CMMCStatusBadge tone="info">{workflowPoamRows.length} Open Items</CMMCStatusBadge>}
       >
         <div className="overflow-x-auto">
           <table className="w-full min-w-[1180px] text-left text-sm">
@@ -118,10 +120,10 @@ function applyPoamWorkflowFields(row, evidenceWorkflowFields = {}, controlWorkfl
   return {
     ...row,
     evidenceStatus: workflowFieldValue(controlWorkflowFields[row.controlId], "status", row.evidenceStatus),
-    ownerCollector: workflowFieldValue(fieldOverrides, "ownerCollector", row.ownerCollector),
-    dateCollected: workflowFieldValue(fieldOverrides, "dateCollected", row.dateCollected),
-    sourceSystemTool: workflowFieldValue(fieldOverrides, "sourceSystemTool", row.sourceSystemTool),
-    notesGaps: workflowFieldValue(fieldOverrides, "notesGaps", row.notesGaps),
+    ownerCollector: workflowFieldValue(fieldOverrides, "poamOwner", workflowFieldValue(fieldOverrides, "ownerCollector", row.ownerCollector)),
+    dateCollected: workflowFieldValue(fieldOverrides, "poamDueDate", workflowFieldValue(fieldOverrides, "dateCollected", row.dateCollected)),
+    sourceSystemTool: workflowFieldValue(fieldOverrides, "poamResources", workflowFieldValue(fieldOverrides, "sourceSystemTool", row.sourceSystemTool)),
+    notesGaps: workflowFieldValue(fieldOverrides, "poamWeakness", workflowFieldValue(fieldOverrides, "notesGaps", row.notesGaps)),
   };
 }
 

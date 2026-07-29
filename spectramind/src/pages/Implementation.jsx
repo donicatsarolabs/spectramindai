@@ -1686,10 +1686,10 @@ class WorkspaceErrorBoundary extends Component {
   }
 }
 
-function ImplementationWorkspace({ item, framework, data, savedState = {}, workspaceData = {}, onWorkspaceStateChange, onClose, relationshipGraph, onNavigateRelatedItem }) {
+function ImplementationWorkspace({ item, framework, data, savedState, workspaceData = {}, onWorkspaceStateChange, onClose, relationshipGraph, onNavigateRelatedItem }) {
   const { user } = useUser();
   const location = useLocation();
-  const state = savedState || {};
+  const state = useMemo(() => savedState || {}, [savedState]);
   const graphLinkedItems = useMemo(
     () => getLinkedItemsFromGraph(item, data, relationshipGraph),
     [data, item, relationshipGraph]
@@ -1940,6 +1940,8 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, works
     });
     const nextEvidenceIds = nextEvidenceFiles.map((evidence) => evidence.id);
     const nextTimeline = [
+      // Event handlers intentionally create unique timeline identifiers.
+      // eslint-disable-next-line react-hooks/purity
       { id: `evidence-${Date.now()}`, label: "Evidence updated" },
       ...timeline,
     ];
@@ -1956,6 +1958,8 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, works
 
   const addTimelineEvent = (label, stateOverrides = {}) => {
     const nextTimeline = [
+      // Event handlers intentionally create unique timeline identifiers.
+      // eslint-disable-next-line react-hooks/purity
       { id: `${timeline.length + 1}-${label}-${Date.now()}`, label },
       ...timeline,
     ];
@@ -2002,6 +2006,8 @@ function ImplementationWorkspace({ item, framework, data, savedState = {}, works
     const trimmedComment = commentText.trim();
     if (!trimmedComment) return;
     const newCommentObj = {
+      // Event handlers intentionally create unique comment identifiers.
+      // eslint-disable-next-line react-hooks/purity
       id: `comment-${Date.now()}`,
       user: user?.name || "User",
       text: trimmedComment,
@@ -3281,10 +3287,6 @@ function collectActivity(workspaceState, item) {
     status: safeDisplayText(activity.timestamp || activity.createdAt || "Activity"),
     description: safeDisplayText(activity.description),
   }));
-}
-
-function auditFindingToItemType(finding) {
-  return finding.type && finding.type !== "Audit" ? finding.type : "Audit";
 }
 
 function uniqueById(items) {

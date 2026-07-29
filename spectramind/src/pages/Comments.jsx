@@ -13,10 +13,10 @@ export default function Comments() {
     return <ActiveFrameworkRequired />;
   }
 
-  return <CommentsContent key={activeFramework.id} activeFramework={activeFramework} />;
+  return <CommentsContent key={activeFramework.id} />;
 }
 
-function CommentsContent({ activeFramework }) {
+function CommentsContent() {
   const { user } = useUser();
   const { workspaceData, actions } = useComplianceState();
   const [activeTab, setActiveTab] = useState("All");

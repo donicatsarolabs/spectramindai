@@ -327,6 +327,29 @@ export function syncQuestionnaireApplicabilityToWorkspace(answers, frameworkId, 
   }
 }
 
+export function syncFrameworkWorkspaceItems(frameworkId, items = {}, session = getStoredSession()) {
+  const activeFrameworkId = resolveFrameworkId(frameworkId) || frameworkId;
+  if (!activeFrameworkId || !items || typeof items !== "object") return;
+
+  try {
+    const latestWorkspace = loadLegacyWorkspace(session);
+    const nextWorkspace = { ...latestWorkspace };
+
+    Object.entries(items).forEach(([itemId, state]) => {
+      if (!itemId || !state || typeof state !== "object" || Array.isArray(state)) return;
+      const storageKey = getLegacyWorkspaceStorageKey(activeFrameworkId, itemId);
+      nextWorkspace[storageKey] = {
+        ...(nextWorkspace[storageKey] || {}),
+        ...state,
+      };
+    });
+
+    persistLegacyWorkspace(nextWorkspace, session);
+  } catch {
+    // The originating workflow remains saved even if the shared workspace mirror fails.
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**

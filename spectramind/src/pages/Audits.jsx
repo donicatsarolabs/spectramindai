@@ -1,6 +1,6 @@
 import { AlertTriangle, CheckCircle2, ClipboardCheck, ExternalLink, FileCheck2, Search, ShieldAlert, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useUser } from "../auth/UserContext";
 import { AUDIT_CATEGORIES, AUDIT_SEVERITIES } from "../audit/AuditReadinessEngine";
 import { loadAuditReviews, markFindingReviewed, saveAuditReviews } from "../audit/AuditReviewService";
@@ -16,8 +16,26 @@ import { resolveFrameworkId } from "../core/engines/framework-engine/frameworkRe
 const statusOptions = ["All", "Open", "Reviewed", "Resolved"];
 
 export default function Audits() {
-  const { activeFramework } = useFrameworkWorkspace();
+  const { activeFramework, selectedFrameworks, setActiveFramework } = useFrameworkWorkspace();
+  const [searchParams] = useSearchParams();
+  const requestedFramework = useMemo(() => {
+    const requestedSlug = searchParams.get("framework");
+    if (!requestedSlug) return null;
+    return selectedFrameworks.find(
+      (framework) => framework.slug === requestedSlug || framework.id === requestedSlug
+    ) || null;
+  }, [searchParams, selectedFrameworks]);
+
+  useEffect(() => {
+    if (requestedFramework && activeFramework?.id !== requestedFramework.id) {
+      setActiveFramework(requestedFramework.id);
+    }
+  }, [activeFramework?.id, requestedFramework, setActiveFramework]);
+
   if (!activeFramework) return <ActiveFrameworkRequired />;
+  if (requestedFramework && activeFramework.id !== requestedFramework.id) {
+    return <AppShell><p className="p-6 text-sm font-bold text-slate-500">Opening {requestedFramework.name} audit readiness…</p></AppShell>;
+  }
   return <AuditCenter key={activeFramework.id} activeFramework={activeFramework} />;
 }
 

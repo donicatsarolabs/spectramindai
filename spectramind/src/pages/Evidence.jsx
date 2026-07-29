@@ -61,7 +61,7 @@ function EvidenceContent({ activeFramework }) {
   );
   const records = useMemo(
     () => mergeEvidenceRecords(isApiEnabled ? apiRecords : evidenceStore.records, cmmcEvidenceRecords).filter((record) => !record.deletedAt),
-    [activeFramework.slug, apiRecords, cmmcEvidenceRecords, evidenceStore.records]
+    [apiRecords, cmmcEvidenceRecords, evidenceStore.records]
   );
   const openImplementationRecord = (itemId, itemType, evidenceId) => {
     const target = buildCrossModuleTarget({

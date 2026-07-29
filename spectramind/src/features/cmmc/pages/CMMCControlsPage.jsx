@@ -1,5 +1,5 @@
-import CMMCModulePlaceholderPage from "./CMMCModulePlaceholderPage";
+import CMMCOrganizationPage from "./CMMCOrganizationPage";
 
 export default function CMMCControlsPage() {
-  return <CMMCModulePlaceholderPage moduleId="controls" />;
+  return <CMMCOrganizationPage />;
 }

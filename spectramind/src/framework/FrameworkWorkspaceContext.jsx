@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { canManageWorkspace, getOrganizationScopedStorageKey, getStoredSession } from "../auth/session";
 import { getFrameworkLibrary, resolveFrameworkId } from "../core/engines/framework-engine/frameworkRegistry";
@@ -89,6 +90,8 @@ export function FrameworkWorkspaceProvider({ children }) {
     const apiSession = getApiSession();
     if (!isApiEnabled) return undefined;
     if (!apiSession?.token || !apiSession?.organizationId) {
+      // Reset organization-scoped state when the API session is removed.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setWorkspace(emptyWorkspace());
       setIsLoadingFrameworks(false);
       setFrameworkLoadError("");

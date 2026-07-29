@@ -1,5 +1,6 @@
 import { ChevronDown } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   CMMC_FRAMEWORK_ID,
   getFrameworkLibrary,
@@ -8,6 +9,7 @@ import { CMMCImplementationLayout, useCMMCWorkspaceFilters } from "../components
 import {
   CMMC_CONTROL_WORKFLOW_STATUS_OPTIONS,
   getCMMCOrganizationProfileSearchText,
+  useCMMCModuleState,
   useCMMCSPRSCalculation,
   useCMMCWorkflowState,
 } from "../hooks";
@@ -18,6 +20,15 @@ const domainGroups = buildDomainGroups(cmmcLibrary);
 
 export default function CMMCOrganizationPage() {
   const { searchQuery, domainFilter, resetVersion, statusFilter } = useCMMCWorkspaceFilters();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") === "assessment" ? "assessment" : "controls";
+  const changeTab = (tab) => {
+    const next = new URLSearchParams(searchParams);
+    if (tab === "assessment") next.set("tab", "assessment");
+    else next.delete("tab");
+    setSearchParams(next, { replace: true });
+  };
+
   return (
     <CMMCImplementationLayout>
       <CMMCOrganizationContent
@@ -25,13 +36,20 @@ export default function CMMCOrganizationPage() {
         searchQuery={searchQuery}
         domainFilter={domainFilter}
         statusFilter={statusFilter}
+        activeTab={activeTab}
+        onTabChange={changeTab}
       />
     </CMMCImplementationLayout>
   );
 }
 
-function CMMCOrganizationContent({ searchQuery, domainFilter, statusFilter }) {
-  const { organizationProfile, controlWorkflowFields, updateControlWorkflowStatus } = useCMMCWorkflowState();
+function CMMCOrganizationContent({ searchQuery, domainFilter, statusFilter, activeTab, onTabChange }) {
+  const {
+    organizationProfile,
+    controlWorkflowFields,
+    updateControlWorkflowField,
+    updateControlWorkflowStatus,
+  } = useCMMCWorkflowState();
   const sprsMetrics = useCMMCSPRSCalculation();
   const [openDomains, setOpenDomains] = useState({ AC: true });
   const normalizedSearch = searchQuery.trim().toLowerCase();
@@ -43,6 +61,21 @@ function CMMCOrganizationContent({ searchQuery, domainFilter, statusFilter }) {
     () => applyControlWorkflowFields(domainGroups, controlWorkflowFields),
     [controlWorkflowFields]
   );
+  const assessmentInitialState = useMemo(() => ({
+    assessment: {
+      id: "",
+      c3pao: "",
+      leadAssessor: "",
+      status: "Planning",
+      startDate: "",
+      endDate: "",
+      scope: "",
+      reference: "",
+      updatedAt: "",
+    },
+    results: {},
+  }), []);
+  const assessmentModule = useCMMCModuleState("assessment-objectives", assessmentInitialState);
 
   const statusCounts = useMemo(() => {
     if (Number(sprsMetrics.totalControls)) {
@@ -108,6 +141,26 @@ function CMMCOrganizationContent({ searchQuery, domainFilter, statusFilter }) {
 
   return (
     <div className="space-y-4">
+      <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+        <TabButton active={activeTab === "controls"} onClick={() => onTabChange("controls")}>
+          Control status
+        </TabButton>
+        <TabButton active={activeTab === "assessment"} onClick={() => onTabChange("assessment")}>
+          Assessment
+        </TabButton>
+      </div>
+
+      {activeTab === "assessment" ? (
+        <AssessmentWorkspace
+          controls={visibleDomains.flatMap((domain) => domain.controls.map((control) => ({
+            ...control,
+            domainCode: domain.code,
+          })))}
+          module={assessmentModule}
+          onStatusChange={updateControlWorkflowStatus}
+        />
+      ) : (
+        <>
         <div className="grid gap-3 sm:grid-cols-4">
           <StatusCard value={statusCounts.Completed} label="Completed" tone="text-emerald-500" />
           <StatusCard value={statusCounts["In Progress"]} label="In Progress" tone="text-amber-500" />
@@ -153,6 +206,7 @@ function CMMCOrganizationContent({ searchQuery, domainFilter, statusFilter }) {
                           <th className="px-4 py-3">Control Description</th>
                           <th className="w-48 px-4 py-3">Evidence Needed</th>
                           <th className="w-56 px-4 py-3">Assessment Objective</th>
+                          <th className="w-44 px-4 py-3">Owner</th>
                           <th className="w-40 px-4 py-3">Status</th>
                         </tr>
                       </thead>
@@ -176,6 +230,14 @@ function CMMCOrganizationContent({ searchQuery, domainFilter, statusFilter }) {
                               <td className="px-4 py-3 text-xs font-semibold leading-5 text-violet-600">{control.evidence}</td>
                               <td className="px-4 py-3 text-xs font-semibold leading-5 text-slate-500">{control.objective}</td>
                               <td className="px-4 py-3">
+                                <input
+                                  value={control.owner || ""}
+                                  onChange={(event) => updateControlWorkflowField(control.workflowKey, "owner", event.target.value)}
+                                  placeholder="Assign owner"
+                                  className="h-8 w-full rounded border border-slate-200 px-2 text-xs font-semibold outline-none focus:border-violet-400"
+                                />
+                              </td>
+                              <td className="px-4 py-3">
                                 <select
                                   value={status}
                                   onChange={(event) => updateStatus(control.workflowKey, event.target.value)}
@@ -198,8 +260,173 @@ function CMMCOrganizationContent({ searchQuery, domainFilter, statusFilter }) {
             );
           })}
         </div>
+        </>
+      )}
     </div>
   );
+}
+
+function TabButton({ active, children, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-md px-4 py-2 text-sm font-black transition ${
+        active ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function AssessmentWorkspace({ controls, module, onStatusChange }) {
+  const assessment = module.state.assessment || {};
+  const results = module.state.results || {};
+  const counts = controls.reduce(
+    (totals, control) => {
+      const outcome = results[control.workflowKey]?.outcome;
+      if (outcome === "MET") totals.met += 1;
+      else if (outcome === "NOT MET") totals.notMet += 1;
+      else if (outcome === "NOT APPLICABLE") totals.notApplicable += 1;
+      else totals.pending += 1;
+      return totals;
+    },
+    { met: 0, notMet: 0, notApplicable: 0, pending: 0 }
+  );
+  const updateAssessment = (field, value) => {
+    module.updateState((current) => ({
+      ...current,
+      assessment: {
+        ...(current.assessment || {}),
+        [field]: value,
+        updatedAt: new Date().toISOString(),
+      },
+    }));
+  };
+  const updateResult = (controlId, field, value) => {
+    module.updateState((current) => ({
+      ...current,
+      results: {
+        ...(current.results || {}),
+        [controlId]: {
+          ...(current.results?.[controlId] || {}),
+          [field]: value,
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    }));
+    if (field === "outcome") {
+      const workflowStatus = {
+        MET: "Completed",
+        "NOT MET": "In Progress",
+        "NOT APPLICABLE": "Not Applicable",
+      }[value] || "Not Started";
+      onStatusChange(controlId, workflowStatus, {
+        source: "assessment",
+      });
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-lg font-black text-slate-950">CMMC assessment record</h2>
+            <p className="mt-1 text-sm font-semibold text-slate-500">
+              Record assessment context and the assessor&apos;s determination for each in-scope control.
+            </p>
+          </div>
+          <PersistenceStatus persistence={module.persistence} />
+        </div>
+        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <AssessmentField label="Assessment ID" value={assessment.id} onChange={(value) => updateAssessment("id", value)} />
+          <AssessmentField label="C3PAO / assessor organization" value={assessment.c3pao} onChange={(value) => updateAssessment("c3pao", value)} />
+          <AssessmentField label="Lead assessor" value={assessment.leadAssessor} onChange={(value) => updateAssessment("leadAssessor", value)} />
+          <label className="text-xs font-black uppercase tracking-wide text-slate-500">
+            Assessment status
+            <select value={assessment.status || "Planning"} onChange={(event) => updateAssessment("status", event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-bold normal-case tracking-normal text-slate-700 outline-none focus:border-violet-400">
+              {["Planning", "Evidence Collection", "Fieldwork", "Findings Review", "Conditional Closeout", "Complete"].map((status) => <option key={status}>{status}</option>)}
+            </select>
+          </label>
+          <AssessmentField label="Start date" type="date" value={assessment.startDate} onChange={(value) => updateAssessment("startDate", value)} />
+          <AssessmentField label="End date" type="date" value={assessment.endDate} onChange={(value) => updateAssessment("endDate", value)} />
+          <AssessmentField label="Scope" value={assessment.scope} onChange={(value) => updateAssessment("scope", value)} />
+          <AssessmentField label="Reference" value={assessment.reference} onChange={(value) => updateAssessment("reference", value)} />
+        </div>
+      </section>
+
+      <div className="grid gap-3 sm:grid-cols-4">
+        <StatusCard value={counts.met} label="Met" tone="text-emerald-600" />
+        <StatusCard value={counts.notMet} label="Not Met" tone="text-rose-600" />
+        <StatusCard value={counts.pending} label="Pending" tone="text-amber-600" />
+        <StatusCard value={counts.notApplicable} label="Not Applicable" tone="text-slate-400" />
+      </div>
+
+      <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1180px] text-left text-sm">
+            <thead className="border-b border-slate-100 bg-slate-50 text-[11px] font-black uppercase tracking-wide text-slate-400">
+              <tr>
+                <th className="w-28 px-4 py-3">Control</th>
+                <th className="px-4 py-3">Assessment objective</th>
+                <th className="w-48 px-4 py-3">Method</th>
+                <th className="w-44 px-4 py-3">Outcome</th>
+                <th className="w-52 px-4 py-3">Assessor</th>
+                <th className="w-72 px-4 py-3">Notes</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {controls.map((control) => {
+                const result = results[control.workflowKey] || {};
+                return (
+                  <tr key={control.key} className="align-top hover:bg-slate-50/70">
+                    <td className="px-4 py-3"><p className="font-black text-violet-700">{control.id}</p><p className="mt-1 text-xs font-bold text-slate-400">{control.domainCode}</p></td>
+                    <td className="px-4 py-3"><p className="font-semibold leading-5 text-slate-700">{control.description}</p><p className="mt-2 text-xs font-semibold leading-5 text-slate-500">{control.objective}</p></td>
+                    <td className="px-4 py-3"><ResultSelect value={result.method} onChange={(value) => updateResult(control.workflowKey, "method", value)} options={["Examine", "Interview", "Test", "Examine + Interview + Test"]} /></td>
+                    <td className="px-4 py-3"><ResultSelect value={result.outcome} onChange={(value) => updateResult(control.workflowKey, "outcome", value)} options={["MET", "NOT MET", "NOT APPLICABLE"]} /></td>
+                    <td className="px-4 py-3"><input value={result.assessor || ""} onChange={(event) => updateResult(control.workflowKey, "assessor", event.target.value)} placeholder="Assessor name" className="h-9 w-full rounded-lg border border-slate-200 px-3 text-xs font-semibold outline-none focus:border-violet-400" /></td>
+                    <td className="px-4 py-3"><textarea value={result.notes || ""} onChange={(event) => updateResult(control.workflowKey, "notes", event.target.value)} placeholder="Decision notes or evidence checked" className="min-h-20 w-full rounded-lg border border-slate-200 p-3 text-xs font-semibold outline-none focus:border-violet-400" /></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {!controls.length ? <p className="p-8 text-center text-sm font-bold text-slate-500">No controls match the current CMMC workspace filters.</p> : null}
+      </section>
+    </div>
+  );
+}
+
+function AssessmentField({ label, onChange, type = "text", value = "" }) {
+  return (
+    <label className="text-xs font-black uppercase tracking-wide text-slate-500">
+      {label}
+      <input type={type} value={value || ""} onChange={(event) => onChange(event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold normal-case tracking-normal text-slate-700 outline-none focus:border-violet-400" />
+    </label>
+  );
+}
+
+function ResultSelect({ onChange, options, value = "" }) {
+  return (
+    <select value={value || ""} onChange={(event) => onChange(event.target.value)} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 outline-none focus:border-violet-400">
+      <option value="">Pending</option>
+      {options.map((option) => <option key={option}>{option}</option>)}
+    </select>
+  );
+}
+
+function PersistenceStatus({ persistence }) {
+  const labels = {
+    loading: "Loading saved assessment…",
+    saving: "Saving assessment…",
+    saved: "Assessment saved",
+    error: "Assessment could not be saved",
+  };
+  const label = labels[persistence.status] || (persistence.mode === "api" ? "API persistence" : "Browser fallback");
+  return <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-black text-slate-500">{label}</span>;
 }
 
 function StatusCard({ value, label, tone }) {
@@ -217,6 +444,7 @@ function applyControlWorkflowFields(domainGroups, controlWorkflowFields = {}) {
     controls: domain.controls.map((control) => ({
       ...control,
       status: workflowFieldValue(controlWorkflowFields[control.workflowKey], "status", control.status),
+      owner: workflowFieldValue(controlWorkflowFields[control.workflowKey], "owner", ""),
     })),
   }));
 }

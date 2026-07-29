@@ -28,33 +28,25 @@ const evidenceRows = buildEvidenceRows(cmmcLibrary);
 const attachmentAccept = ".pdf,.docx,.xlsx,.png,.jpg,.jpeg";
 const supportedAttachmentTypes = new Set(["PDF", "DOCX", "XLSX", "PNG", "JPG", "JPEG"]);
 
-const initialSspForm = {
-  owner: "",
-  version: "",
-  date: "",
-  currentSprs: "",
-  purpose: "",
-};
-
 const sspWorkflowAnswerIds = {
   organizationName: "organizationName",
   systemName: "systemName",
   scope: "systemBoundaryScope",
   environment: "systemEnvironmentDescription",
+  owner: "cmmcSspOwner",
+  version: "cmmcSspVersion",
+  date: "cmmcAssessmentDate",
+  purpose: "cmmcSystemPurpose",
 };
 
 const poamWorkflowFields = {
-  weakness: "notesGaps",
-  owner: "ownerCollector",
-  date: "dateCollected",
-  resources: "sourceSystemTool",
+  weakness: "poamWeakness",
+  owner: "poamOwner",
+  date: "poamDueDate",
+  resources: "poamResources",
   status: "evidenceStatus",
+  milestones: "poamMilestones",
 };
-
-const initialPoamMilestones = evidenceRows.reduce((milestones, row) => {
-  milestones[row.key] = row.evidence;
-  return milestones;
-}, {});
 
 export default function CMMCEvidencePage() {
   const { searchQuery, domainFilter, resetVersion, statusFilter } = useCMMCWorkspaceFilters();
@@ -92,8 +84,6 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
   const [activeTab, setActiveTab] = useState(() =>
     tabs.some((tab) => tab.id === requestedTab) ? requestedTab : "ssp"
   );
-  const [sspForm, setSspForm] = useState(initialSspForm);
-  const [poamMilestones, setPoamMilestones] = useState(initialPoamMilestones);
   const [attachmentUploadStatusByControl, setAttachmentUploadStatusByControl] = useState({});
   const normalizedSearch = searchQuery.trim().toLowerCase();
   const workflowSspForm = useMemo(
@@ -101,8 +91,8 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
     [organizationProfile, scopeAnswers]
   );
   const sspFormValues = useMemo(
-    () => ({ ...sspForm, ...workflowSspForm, currentSprs: formatMetricNumber(sprsMetrics.currentSPRSScore) }),
-    [sprsMetrics.currentSPRSScore, sspForm, workflowSspForm]
+    () => ({ ...workflowSspForm, currentSprs: formatMetricNumber(sprsMetrics.currentSPRSScore) }),
+    [sprsMetrics.currentSPRSScore, workflowSspForm]
   );
   const workflowEvidenceRows = useMemo(
     () =>
@@ -129,8 +119,8 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
     [policyDocumentRows]
   );
   const poamNotes = useMemo(
-    () => buildPoamNotes(workflowEvidenceRows, poamMilestones),
-    [poamMilestones, workflowEvidenceRows]
+    () => buildPoamNotes(workflowEvidenceRows),
+    [workflowEvidenceRows]
   );
 
   const visiblePolicies = useMemo(
@@ -164,8 +154,9 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
 
   const visiblePoamRows = useMemo(
     () =>
-      workflowEvidenceRows.filter((row) => {
+      uniqueRowsByControl(workflowEvidenceRows.filter((row) => {
         const rowStatus = row.evidenceStatus;
+        const isOpenGap = !["Completed", "Not Applicable"].includes(rowStatus);
         const matchesDomain = domainFilter === "all" || domainFilter === row.domain;
         const matchesStatus = statusFilter === "All" || statusFilter === rowStatus;
         const matchesSearch =
@@ -188,8 +179,8 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
             .toLowerCase()
             .includes(normalizedSearch);
 
-        return matchesDomain && matchesStatus && matchesSearch;
-      }),
+        return isOpenGap && matchesDomain && matchesStatus && matchesSearch;
+      })),
     [domainFilter, normalizedSearch, poamNotes, statusFilter, workflowEvidenceRows]
   );
 
@@ -227,7 +218,6 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
       return;
     }
 
-    setSspForm((current) => ({ ...current, [field]: value }));
   };
 
   const updatePoamNote = (id, field, value) => {
@@ -248,9 +238,6 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
       return;
     }
 
-    if (field === "milestones") {
-      setPoamMilestones((current) => ({ ...current, [id]: value }));
-    }
   };
 
   const attachEvidenceFiles = async (controlId, currentAttachments, files) => {
@@ -343,7 +330,7 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
             form={sspFormValues}
             onChange={updateSspForm}
             controls={visibleSspControls}
-            onNoteChange={(evidenceKey, value) => updateEvidenceWorkflowField(evidenceKey, "notesGaps", value)}
+            onNoteChange={(evidenceKey, value) => updateEvidenceWorkflowField(evidenceKey, "implementationDescription", value)}
             onAttachFiles={attachEvidenceFiles}
             selectedControlId={selectedControlId}
             uploadStatusByControl={attachmentUploadStatusByControl}
@@ -435,7 +422,7 @@ function SSPView({ form, onChange, controls, onNoteChange, onAttachFiles, select
               </p>
               <TextArea
                 label="Implementation Description"
-                value={row.notesGaps}
+                value={row.implementationDescription}
                 placeholder="Describe how this control is implemented in your environment. Include tools, processes, responsible personnel, and specific configurations..."
                 onChange={(value) => onNoteChange(row.key, value)}
               />
@@ -556,10 +543,6 @@ function PolicyView({ policies, metrics, organizationName, selectedPolicyKey }) 
     <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-black text-slate-900">Policy Documents - NIST SP 800-171 Rev 2</h1>
-        <button type="button" className="inline-flex w-fit items-center gap-2 rounded-lg bg-[#171630] px-4 py-2 text-sm font-black text-white">
-          <Printer size={15} />
-          Print All Policies
-        </button>
       </div>
       <section className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -569,15 +552,15 @@ function PolicyView({ policies, metrics, organizationName, selectedPolicyKey }) 
           </p>
         </div>
         <div className="flex gap-8 text-center">
-          <StatusStat value={metrics.evidenceCount} label="Evidence" tone="text-emerald-500" />
-          <StatusStat value={metrics.blankStatusCount} label="Blank Status" tone="text-amber-500" />
+          <StatusStat value={metrics.totalPolicies} label="Policies" tone="text-emerald-500" />
+          <StatusStat value={metrics.controlCount} label="Mapped Controls" tone="text-violet-600" />
           <StatusStat value={metrics.familyCount} label="Families" tone="text-slate-400" />
         </div>
       </section>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {policies.map((row) => {
           const isSelected = Boolean(selectedPolicyKey) &&
-            (row.key === selectedPolicyKey || row.controlId === selectedPolicyKey);
+            (row.key === selectedPolicyKey || row.linkedControls?.includes(selectedPolicyKey));
 
           return (
           <button
@@ -590,13 +573,13 @@ function PolicyView({ policies, metrics, organizationName, selectedPolicyKey }) 
             }`}
           >
             <p className="text-left text-xs font-black uppercase tracking-wide text-slate-500">
-              {row.section} - {row.family}
+              {row.domain} - {row.family}
             </p>
-            <h2 className="mt-2 text-left text-lg font-black text-slate-900">{row.controlId}</h2>
-            <p className="mt-3 line-clamp-3 min-h-16 text-left text-sm font-semibold leading-6 text-slate-500">{row.evidence}</p>
+            <h2 className="mt-2 text-left text-lg font-black text-slate-900">{row.title}</h2>
+            <p className="mt-3 line-clamp-3 min-h-16 text-left text-sm font-semibold leading-6 text-slate-500">{row.description}</p>
             <div className="mt-4 flex items-center justify-between">
               <span className="rounded bg-amber-50 px-2 py-1 text-xs font-black text-amber-700">{row.evidenceStatus}</span>
-              <span className="max-w-[55%] truncate text-xs font-bold text-slate-400">{row.sourceSystemTool || "Open document"}</span>
+              <span className="max-w-[55%] truncate text-xs font-bold text-slate-400">{row.controlCount} mapped controls</span>
             </div>
           </button>
           );
@@ -612,6 +595,9 @@ function applyEvidenceWorkflowFields(row, fieldOverrides = {}, controlFieldOverr
 
   return {
     ...row,
+    poamId: !["Completed", "Not Applicable"].includes(currentWorkflowStatus || evidenceStatus)
+      ? `POAM-${row.controlId}`
+      : "",
     evidenceStatus: workflowFieldValue(controlFieldOverrides, "status", evidenceStatus),
     evidenceWorkflowStatus: evidenceStatus,
     currentWorkflowStatus,
@@ -619,6 +605,37 @@ function applyEvidenceWorkflowFields(row, fieldOverrides = {}, controlFieldOverr
     dateCollected: workflowFieldValue(fieldOverrides, "dateCollected", row.dateCollected),
     sourceSystemTool: workflowFieldValue(fieldOverrides, "sourceSystemTool", row.sourceSystemTool),
     notesGaps: workflowFieldValue(fieldOverrides, "notesGaps", row.notesGaps),
+    implementationDescription: workflowFieldValue(
+      fieldOverrides,
+      "implementationDescription",
+      workflowFieldValue(fieldOverrides, "notesGaps", row.notesGaps)
+    ),
+    poamWeakness: workflowFieldValue(
+      fieldOverrides,
+      "poamWeakness",
+      workflowFieldValue(fieldOverrides, "notesGaps", row.notesGaps)
+    ),
+    poamOwner: workflowFieldValue(
+      fieldOverrides,
+      "poamOwner",
+      workflowFieldValue(fieldOverrides, "ownerCollector", row.ownerCollector)
+    ),
+    poamDueDate: workflowFieldValue(
+      fieldOverrides,
+      "poamDueDate",
+      workflowFieldValue(fieldOverrides, "dateCollected", row.dateCollected)
+    ),
+    poamResources: workflowFieldValue(
+      fieldOverrides,
+      "poamResources",
+      workflowFieldValue(fieldOverrides, "sourceSystemTool", row.sourceSystemTool)
+    ),
+    poamMilestones: workflowFieldValue(
+      fieldOverrides,
+      "poamMilestones",
+      workflowFieldValue(fieldOverrides, "milestones", row.evidence)
+    ),
+    milestones: workflowFieldValue(fieldOverrides, "milestones", row.evidence),
     attachments: Array.isArray(controlFieldOverrides?.attachments) ? controlFieldOverrides.attachments : [],
   };
 }
@@ -627,14 +644,14 @@ function workflowFieldValue(fieldOverrides, field, fallback) {
   return Object.prototype.hasOwnProperty.call(fieldOverrides || {}, field) ? fieldOverrides[field] : fallback;
 }
 
-function buildPoamNotes(rows, milestones) {
+function buildPoamNotes(rows) {
   return rows.reduce((notes, row) => {
     notes[row.key] = {
-      weakness: row.notesGaps,
-      owner: row.ownerCollector,
-      date: row.dateCollected,
-      resources: row.sourceSystemTool,
-      milestones: Object.prototype.hasOwnProperty.call(milestones, row.key) ? milestones[row.key] : row.evidence,
+      weakness: row.poamWeakness,
+      owner: row.poamOwner,
+      date: row.poamDueDate,
+      resources: row.poamResources,
+      milestones: row.poamMilestones,
       status: row.evidenceStatus,
     };
     return notes;
@@ -647,6 +664,10 @@ function buildWorkflowSspForm(organizationProfile = {}, scopeAnswers = {}) {
     systemName: organizationProfile.systemName || "",
     scope: getAnswerText(scopeAnswers, "systemBoundaryScope") || buildWorkflowScopeSummary(organizationProfile),
     environment: getAnswerText(scopeAnswers, "systemEnvironmentDescription") || buildWorkflowEnvironmentSummary(organizationProfile, scopeAnswers),
+    owner: getAnswerText(scopeAnswers, "cmmcSspOwner"),
+    version: getAnswerText(scopeAnswers, "cmmcSspVersion"),
+    date: getAnswerText(scopeAnswers, "cmmcAssessmentDate"),
+    purpose: getAnswerText(scopeAnswers, "cmmcSystemPurpose"),
   };
 }
 
@@ -858,6 +879,16 @@ function buildEvidenceMetrics(rows) {
     familyCount: new Set(rows.map((row) => row.domain)).size,
     blankStatusCount: rows.filter((row) => !row.evidenceStatus).length,
   };
+}
+
+function uniqueRowsByControl(rows = []) {
+  const rowsByControl = new Map();
+  rows.forEach((row) => {
+    if (row.controlId && !rowsByControl.has(row.controlId)) {
+      rowsByControl.set(row.controlId, row);
+    }
+  });
+  return Array.from(rowsByControl.values());
 }
 
 function parseControlFamily(controlFamily, controlId) {

@@ -1,3 +1,5 @@
+import { createElement } from "react";
+import { Navigate } from "react-router-dom";
 import {
   CMMCAssessmentObjectivesPage,
   CMMCAuditReadinessPage,
@@ -5,18 +7,12 @@ import {
   CMMCControlsPage,
   CMMCDomainPage,
   CMMCDomainSummaryPage,
-  CMMCEvidenceMappingPage,
   CMMCEvidencePage,
-  CMMCExportCenterPage,
   CMMCGapWizardPage,
   CMMCOrganizationPage,
   CMMCOverviewPage,
   CMMCPOAMPage,
   CMMCPoliciesPage,
-  CMMCProgressTrackingPage,
-  CMMCReadinessScorePage,
-  CMMCReviewStatusPage,
-  CMMCRiskTrackingPage,
   CMMCScopePage,
   CMMCSPRSScorePage,
   CMMCSSPPage,
@@ -37,12 +33,11 @@ export const cmmcWorkspaceRoutes = [
   { path: "/cmmc/domains/:domainId", Component: CMMCDomainPage },
   { path: "/cmmc/controls", Component: CMMCControlsPage },
   { path: "/cmmc/assessment-objectives", Component: CMMCAssessmentObjectivesPage },
-  { path: "/cmmc/progress", Component: CMMCProgressTrackingPage },
-  { path: "/cmmc/readiness-score", Component: CMMCReadinessScorePage },
   { path: "/cmmc/sprs-score", Component: CMMCSPRSScorePage },
   { path: "/cmmc/audit-readiness", Component: CMMCAuditReadinessPage },
-  { path: "/cmmc/evidence-mapping", Component: CMMCEvidenceMappingPage },
-  { path: "/cmmc/risks", Component: CMMCRiskTrackingPage },
-  { path: "/cmmc/review-status", Component: CMMCReviewStatusPage },
-  { path: "/cmmc/export-center", Component: CMMCExportCenterPage },
+  { path: "/cmmc/*", Component: CMMCRouteFallback },
 ];
+
+function CMMCRouteFallback() {
+  return createElement(Navigate, { to: "/cmmc/organization", replace: true });
+}

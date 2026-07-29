@@ -4,6 +4,7 @@ import { loadApiWorkspace, saveApiWorkspaceItem } from "../../../api/workspace";
 import {
   loadOrgQuestionnaireAnswers,
   saveOrgQuestionnaireAnswers,
+  syncFrameworkWorkspaceItems,
 } from "../../../core/adapters/useOrganizationStore";
 import { CMMC_FRAMEWORK_ID } from "../../../core/engines/framework-engine/frameworkRegistry";
 import {
@@ -24,10 +25,17 @@ const EVIDENCE_WORKFLOW_FIELDS = [
   "dateCollected",
   "sourceSystemTool",
   "notesGaps",
+  "milestones",
+  "implementationDescription",
+  "poamWeakness",
+  "poamOwner",
+  "poamDueDate",
+  "poamResources",
+  "poamMilestones",
 ];
-const CONTROL_WORKFLOW_FIELDS = ["status", "attachments"];
+const CONTROL_WORKFLOW_FIELDS = ["status", "attachments", "owner"];
 
-export const CMMC_CONTROL_WORKFLOW_STATUS_OPTIONS = ["Not Started", "In Progress", "Completed"];
+export const CMMC_CONTROL_WORKFLOW_STATUS_OPTIONS = ["Not Started", "In Progress", "Completed", "Not Applicable"];
 
 export function loadCMMCScopeAnswers() {
   return normalizeAnswers(loadOrgQuestionnaireAnswers(CMMC_FRAMEWORK_ID));
@@ -36,6 +44,7 @@ export function loadCMMCScopeAnswers() {
 export function saveCMMCScopeAnswers(answers) {
   const nextAnswers = normalizeAnswers(answers);
   saveOrgQuestionnaireAnswers(nextAnswers, CMMC_FRAMEWORK_ID);
+  syncFrameworkWorkspaceItems(CMMC_FRAMEWORK_ID, buildSharedControlWorkspace(nextAnswers));
   return nextAnswers;
 }
 
@@ -159,6 +168,14 @@ export function useCMMCWorkflowState() {
         };
       });
       persistCMMCEvidenceWorkflowState(normalizedKey, getCMMCEvidenceWorkflowFields(savedAnswers)[normalizedKey])
+        .then(() => {
+          const controlId = options.controlId || getControlIdFromEvidenceKey(normalizedKey);
+          const sharedState = buildSharedControlWorkspace(savedAnswers)[controlId];
+          if (controlId && sharedState) {
+            return persistCMMCControlWorkflowState(controlId, sharedState);
+          }
+          return null;
+        })
         .catch(() => {});
       return savedAnswers;
     },
@@ -437,6 +454,48 @@ function buildApiWorkflowFields(workspaceData = {}) {
     },
     { controlFields: {}, evidenceFields: {} }
   );
+}
+
+function buildSharedControlWorkspace(answers = {}) {
+  const controlFields = getCMMCControlWorkflowFields(answers);
+  const evidenceFields = getCMMCEvidenceWorkflowFields(answers);
+  const evidenceByControl = Object.entries(evidenceFields).reduce((grouped, [evidenceKey, fields]) => {
+    const controlId = getControlIdFromEvidenceKey(evidenceKey);
+    if (!controlId) return grouped;
+    const current = grouped[controlId] || {
+      evidenceKeys: [],
+      owners: [],
+      gapNotes: [],
+      sourceSystems: [],
+      dates: [],
+    };
+    current.evidenceKeys.push(evidenceKey);
+    if (fields.poamOwner || fields.ownerCollector) current.owners.push(fields.poamOwner || fields.ownerCollector);
+    if (fields.poamWeakness || fields.notesGaps) current.gapNotes.push(fields.poamWeakness || fields.notesGaps);
+    if (fields.sourceSystemTool) current.sourceSystems.push(fields.sourceSystemTool);
+    if (fields.poamDueDate || fields.dateCollected) current.dates.push(fields.poamDueDate || fields.dateCollected);
+    grouped[controlId] = current;
+    return grouped;
+  }, {});
+  const controlIds = new Set([...Object.keys(controlFields), ...Object.keys(evidenceByControl)]);
+
+  return Object.fromEntries(Array.from(controlIds).map((controlId) => {
+    const control = controlFields[controlId] || {};
+    const evidence = evidenceByControl[controlId] || {};
+    const attachments = Array.isArray(control.attachments) ? control.attachments : [];
+    return [controlId, {
+      itemType: "control",
+      status: control.status || "Not Started",
+      owner: control.owner || evidence.owners?.[0] || "",
+      evidenceCount: attachments.length,
+      evidenceFiles: attachments,
+      linkedEvidenceIds: evidence.evidenceKeys || [],
+      dueDate: evidence.dates?.[0] || "",
+      notes: (evidence.gapNotes || []).join("\n"),
+      sourceSystems: evidence.sourceSystems || [],
+      updatedAt: new Date().toISOString(),
+    }];
+  }));
 }
 
 function pickWorkflowFields(state, allowedFields) {

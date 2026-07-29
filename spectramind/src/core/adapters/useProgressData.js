@@ -14,10 +14,6 @@ import { ProgressEngineService } from "../../progress-engine/services/ProgressEn
 import { loadOrganizationWorkspace } from "../../data/organizationWorkspace";
 import { useFrameworkData } from "./useFrameworkData";
 
-const COMPLETED_STATUSES = new Set([
-  "complete", "completed", "implemented", "ready", "approved", "done",
-]);
-
 const EVIDENCE_COMPLETED_STATUSES = new Set([
   "approved", "complete", "completed",
 ]);
@@ -39,7 +35,7 @@ export function useProgressData(frameworkSlug) {
     const engine = new ProgressEngineService();
     const workspaceData = loadOrganizationWorkspace(frameworkSlug);
 
-    const { controls, risks, tests, policies, populations } = frameworkData;
+    const { controls, risks, tests, policies } = frameworkData;
 
     // ── Controls ─────────────────────────────────────────────────────────────
     const progressControls = controls.map((c) => ({
@@ -125,7 +121,7 @@ export function useProgressData(frameworkSlug) {
     const summary = engine.generateComplianceSummary(progressInput);
 
     return { summary, isReady: controls.length > 0 };
-  }, [frameworkData]);
+  }, [frameworkData, frameworkSlug]);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

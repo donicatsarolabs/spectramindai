@@ -4,13 +4,12 @@ import {
 } from "../../../core/engines/framework-engine/frameworkRegistry";
 
 const cmmcLibrary = getFrameworkLibrary(CMMC_FRAMEWORK_ID) || emptyFrameworkLibrary();
-
 export function buildCMMCPolicyDocumentRows({
   controlWorkflowFields = {},
   evidenceWorkflowFields = {},
   frameworkLibrary = cmmcLibrary,
 } = {}) {
-  return buildEvidenceRows(frameworkLibrary).map((row) => {
+  const evidenceRows = buildEvidenceRows(frameworkLibrary).map((row) => {
     const evidenceFieldOverrides = evidenceWorkflowFields[row.key] || {};
     const controlFieldOverrides = controlWorkflowFields[row.controlId] || {};
     const workflowStatus = workflowFieldValue(
@@ -25,13 +24,32 @@ export function buildCMMCPolicyDocumentRows({
       evidenceStatus: policyStatus,
       policyStatus,
       workflowStatus: normalizeWorkflowStatus(workflowStatus),
-      ownerCollector: workflowFieldValue(evidenceFieldOverrides, "ownerCollector", row.ownerCollector),
+      ownerCollector: workflowFieldValue(
+        controlFieldOverrides,
+        "owner",
+        workflowFieldValue(evidenceFieldOverrides, "ownerCollector", row.ownerCollector)
+      ),
       dateCollected: workflowFieldValue(evidenceFieldOverrides, "dateCollected", row.dateCollected),
       sourceSystemTool: workflowFieldValue(evidenceFieldOverrides, "sourceSystemTool", row.sourceSystemTool),
       notesGaps: workflowFieldValue(evidenceFieldOverrides, "notesGaps", row.notesGaps),
       attachments: Array.isArray(controlFieldOverrides?.attachments) ? controlFieldOverrides.attachments : [],
     };
   });
+
+  const rowsByControl = new Map();
+  evidenceRows.forEach((row) => {
+    if (!row.controlId || rowsByControl.has(row.controlId)) return;
+    rowsByControl.set(row.controlId, {
+      ...row,
+      title: `${row.controlId} Control Policy`,
+      description: row.requirement,
+      linkedControls: [row.controlId],
+      controlCount: 1,
+      evidenceRequests: [row.evidence].filter(Boolean),
+    });
+  });
+
+  return Array.from(rowsByControl.values());
 }
 
 export function buildCMMCPolicyDocumentMetrics(rows = []) {
@@ -110,6 +128,7 @@ function normalizeWorkflowStatus(status) {
   const normalized = String(status || "").trim().toLowerCase();
   if (normalized === "completed" || normalized === "published") return "Completed";
   if (normalized === "in progress" || normalized === "in_progress") return "In Progress";
+  if (normalized === "not applicable" || normalized === "not_applicable") return "Not Applicable";
   return "Not Started";
 }
 

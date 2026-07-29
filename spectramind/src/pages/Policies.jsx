@@ -1739,11 +1739,15 @@ function buildCMMCPolicyPageRow(row, activeFramework, storedPolicy) {
 function cmmcRowToLibraryPolicy(row) {
   return {
     id: row.key,
-    title: row.controlId || row.key,
-    description: row.evidence || row.requirement || "",
+    title: row.title || row.key,
+    description: row.description || row.requirement || "",
     status: row.policyStatus,
-    linkedControls: [row.controlId].filter(Boolean),
+    linkedControls: row.linkedControls || [],
     linkedTests: [],
+    controlRequirement: row.requirement,
+    controlFamily: `${row.domain} - ${row.family}`,
+    evidenceRequests: row.evidenceRequests || [],
+    assessmentGuidance: row.publicNotesUse || "",
   };
 }
 

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useEvidenceStore } from "../core/adapters/useEvidenceStore";
 import { useFrameworkData } from "../core/adapters/useFrameworkData";
@@ -198,17 +199,12 @@ export function ComplianceStateProvider({ children }) {
     }),
     [
       activeFramework,
-      auditReviews,
       evidenceStore,
       progressSummary,
       questionnaireResponses,
       relationshipGraph,
       saveComplianceItem,
       state,
-      policySnapshot,
-      riskStore,
-      taskState,
-      trainingSnapshot,
       updateTask,
       workspaceData,
       completeTask,

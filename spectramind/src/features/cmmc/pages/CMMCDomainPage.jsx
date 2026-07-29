@@ -1,5 +1,7 @@
-import CMMCModulePlaceholderPage from "./CMMCModulePlaceholderPage";
+import { useParams } from "react-router-dom";
+import CMMCOperationalModulePage from "./CMMCOperationalModulePage";
 
 export default function CMMCDomainPage() {
-  return <CMMCModulePlaceholderPage moduleId="domain-details" />;
+  const { domainId = "" } = useParams();
+  return <CMMCOperationalModulePage moduleId="domain-details" domainId={domainId} />;
 }

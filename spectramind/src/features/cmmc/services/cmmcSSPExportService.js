@@ -374,7 +374,7 @@ function sanitizePDFText(value) {
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u2013\u2014]/g, "-")
     .replace(/[\u2022]/g, "-")
-    .replace(/[^\x09\x0A\x0D\x20-\x7E]/g, "");
+    .replace(/[^\u0020-\u007E]/g, "");
 }
 
 function formatNumber(value) {

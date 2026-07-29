@@ -5,7 +5,7 @@ export const cmmcWorkspaceModules = [
     routePath: "/cmmc",
     pageName: "CMMCOverviewPage",
     description: "Top-level CMMC workspace summary.",
-    status: "Foundation",
+    status: "Operational",
   },
   {
     id: "organization",
@@ -13,7 +13,7 @@ export const cmmcWorkspaceModules = [
     routePath: "/cmmc/organization",
     pageName: "CMMCOrganizationPage",
     description: "Organization profile and CMMC scoping workspace.",
-    status: "Foundation",
+    status: "Operational",
   },
   {
     id: "gap-wizard",
@@ -21,7 +21,7 @@ export const cmmcWorkspaceModules = [
     routePath: "/cmmc/gap-wizard",
     pageName: "CMMCGapWizardPage",
     description: "Guided gap intake and prioritization workflow.",
-    status: "Foundation",
+    status: "Operational",
   },
   {
     id: "auditor",
@@ -29,7 +29,7 @@ export const cmmcWorkspaceModules = [
     routePath: "/cmmc/auditor",
     pageName: "CMMCAuditorPage",
     description: "Auditor review and collaboration workspace.",
-    status: "Foundation",
+    status: "Operational",
   },
   {
     id: "evidence",
@@ -37,7 +37,7 @@ export const cmmcWorkspaceModules = [
     routePath: "/cmmc/evidence",
     pageName: "CMMCEvidencePage",
     description: "CMMC evidence repository foundation.",
-    status: "Foundation",
+    status: "Operational",
   },
   {
     id: "ssp",
@@ -45,7 +45,7 @@ export const cmmcWorkspaceModules = [
     routePath: "/cmmc/ssp",
     pageName: "CMMCSSPPage",
     description: "System Security Plan workspace foundation.",
-    status: "Foundation",
+    status: "Operational",
   },
   {
     id: "poam",
@@ -53,7 +53,7 @@ export const cmmcWorkspaceModules = [
     routePath: "/cmmc/poam",
     pageName: "CMMCPOAMPage",
     description: "Plan of Action and Milestones tracking foundation.",
-    status: "Foundation",
+    status: "Operational",
   },
   {
     id: "policy-documents",
@@ -61,7 +61,7 @@ export const cmmcWorkspaceModules = [
     routePath: "/cmmc/policies",
     pageName: "CMMCPoliciesPage",
     description: "Policy document management foundation.",
-    status: "Foundation",
+    status: "Operational",
   },
   {
     id: "domain-summary",
@@ -69,7 +69,7 @@ export const cmmcWorkspaceModules = [
     routePath: "/cmmc/domains",
     pageName: "CMMCDomainSummaryPage",
     description: "CMMC domain rollup foundation.",
-    status: "Foundation",
+    status: "Operational",
   },
   {
     id: "domain-details",
@@ -77,7 +77,7 @@ export const cmmcWorkspaceModules = [
     routePath: "/cmmc/domains/:domainId",
     pageName: "CMMCDomainPage",
     description: "Single-domain workspace foundation.",
-    status: "Foundation",
+    status: "Operational",
   },
   {
     id: "controls",
@@ -85,7 +85,7 @@ export const cmmcWorkspaceModules = [
     routePath: "/cmmc/controls",
     pageName: "CMMCControlsPage",
     description: "CMMC controls workspace foundation.",
-    status: "Foundation",
+    status: "Operational",
   },
   {
     id: "assessment-objectives",
@@ -93,23 +93,7 @@ export const cmmcWorkspaceModules = [
     routePath: "/cmmc/assessment-objectives",
     pageName: "CMMCAssessmentObjectivesPage",
     description: "Assessment objective tracking foundation.",
-    status: "Foundation",
-  },
-  {
-    id: "progress-tracking",
-    title: "Progress Tracking",
-    routePath: "/cmmc/progress",
-    pageName: "CMMCProgressTrackingPage",
-    description: "CMMC progress tracking foundation.",
-    status: "Foundation",
-  },
-  {
-    id: "readiness-score",
-    title: "Readiness Score",
-    routePath: "/cmmc/readiness-score",
-    pageName: "CMMCReadinessScorePage",
-    description: "CMMC readiness score foundation.",
-    status: "Foundation",
+    status: "Operational",
   },
   {
     id: "sprs-score",
@@ -117,7 +101,7 @@ export const cmmcWorkspaceModules = [
     routePath: "/cmmc/sprs-score",
     pageName: "CMMCSPRSScorePage",
     description: "SPRS score foundation.",
-    status: "Foundation",
+    status: "Operational",
   },
   {
     id: "audit-readiness",
@@ -125,39 +109,7 @@ export const cmmcWorkspaceModules = [
     routePath: "/cmmc/audit-readiness",
     pageName: "CMMCAuditReadinessPage",
     description: "Audit readiness workspace foundation.",
-    status: "Foundation",
-  },
-  {
-    id: "evidence-mapping",
-    title: "Evidence Mapping",
-    routePath: "/cmmc/evidence-mapping",
-    pageName: "CMMCEvidenceMappingPage",
-    description: "Evidence-to-control mapping foundation.",
-    status: "Foundation",
-  },
-  {
-    id: "risk-tracking",
-    title: "Risk Tracking",
-    routePath: "/cmmc/risks",
-    pageName: "CMMCRiskTrackingPage",
-    description: "CMMC risk tracking foundation.",
-    status: "Foundation",
-  },
-  {
-    id: "review-status",
-    title: "Review Status",
-    routePath: "/cmmc/review-status",
-    pageName: "CMMCReviewStatusPage",
-    description: "Review status workspace foundation.",
-    status: "Foundation",
-  },
-  {
-    id: "export-center",
-    title: "Export Center",
-    routePath: "/cmmc/export-center",
-    pageName: "CMMCExportCenterPage",
-    description: "Export center foundation.",
-    status: "Foundation",
+    status: "Operational",
   },
 ];
 

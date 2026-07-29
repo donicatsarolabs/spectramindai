@@ -107,7 +107,7 @@ export function useEvidenceStore(frameworkId) {
         });
       });
     },
-    [user, withEngine],
+    [frameworkId, user, withEngine],
   );
 
   /** Removes an evidence record by its display name. */

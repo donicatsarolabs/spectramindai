@@ -1,5 +1,5 @@
-import CMMCModulePlaceholderPage from "./CMMCModulePlaceholderPage";
+import { Navigate } from "react-router-dom";
 
 export default function CMMCSSPPage() {
-  return <CMMCModulePlaceholderPage moduleId="ssp" />;
+  return <Navigate to="/cmmc/evidence?tab=ssp" replace />;
 }

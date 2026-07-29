@@ -1,5 +1,5 @@
-import CMMCModulePlaceholderPage from "./CMMCModulePlaceholderPage";
+import { Navigate } from "react-router-dom";
 
 export default function CMMCAssessmentObjectivesPage() {
-  return <CMMCModulePlaceholderPage moduleId="assessment-objectives" />;
+  return <Navigate to="/cmmc/organization?tab=assessment" replace />;
 }

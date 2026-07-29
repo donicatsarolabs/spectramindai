@@ -6,7 +6,6 @@ import {
   Mail,
   MessageSquare,
   Plug,
-  RefreshCw,
   Ticket,
 } from "lucide-react";
 import AppShell from "../components/layout/AppShell";

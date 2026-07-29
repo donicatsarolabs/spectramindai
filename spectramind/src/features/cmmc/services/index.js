@@ -1,11 +1,6 @@
 export { calculateCMMCSPRSMetrics } from "./cmmcSPRSCalculationService";
 export { buildCMMCEvidenceAttachmentStats } from "./cmmcDashboardMetricsService";
 export {
-  buildCMMCExecutiveReportData,
-  createCMMCExecutiveReportPDFBlob,
-  exportCMMCExecutiveReportToPDF,
-} from "./cmmcExecutiveReportExportService";
-export {
   buildCMMCPolicyDocumentMetrics,
   buildCMMCPolicyDocumentRows,
   toCMMCPolicyDocumentStatus,
