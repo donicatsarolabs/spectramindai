@@ -5,7 +5,7 @@ import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import Fastify from "fastify";
 import { ZodError } from "zod";
-import { config, corsOrigins } from "./config.js";
+import { config, isAllowedCorsOrigin } from "./config.js";
 import { prisma } from "./lib/prisma.js";
 import { authRoutes } from "./modules/auth/routes.js";
 import { frameworkRoutes } from "./modules/frameworks/routes.js";
@@ -26,7 +26,7 @@ export async function buildApp() {
 
   await app.register(helmet);
   await app.register(cors, {
-    origin: corsOrigins,
+    origin: (origin, callback) => callback(null, isAllowedCorsOrigin(origin)),
     credentials: true,
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   });

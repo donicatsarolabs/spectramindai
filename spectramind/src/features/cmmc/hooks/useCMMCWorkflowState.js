@@ -16,6 +16,7 @@ import {
 const QUESTIONNAIRE_EVENT = "spectramind:questionnaire-updated";
 const CMMC_SPRS_EVENT = "spectramind:cmmc-sprs-updated";
 export const CMMC_CONTROL_STATUS_VALIDATION_EVENT = "spectramind:cmmc-control-status-validation-failed";
+export const CMMC_PERSISTENCE_ERROR_EVENT = "spectramind:cmmc-persistence-error";
 const EVIDENCE_WORKFLOW_FIELDS_KEY = "__cmmcEvidenceWorkflowFields";
 const CONTROL_WORKFLOW_FIELDS_KEY = "__cmmcControlWorkflowFields";
 const SCOPE_WORKSPACE_ITEM_ID = "__cmmc_scope_answers";
@@ -67,12 +68,12 @@ export function getCMMCWorkflowState(scopeAnswers = loadCMMCScopeAnswers()) {
 }
 
 export function useCMMCWorkflowState() {
-  const [scopeAnswers, setScopeAnswers] = useState(() => hasApiSession() ? {} : loadCMMCScopeAnswers());
+  const [scopeAnswers, setScopeAnswers] = useState(() => isApiEnabled ? {} : loadCMMCScopeAnswers());
 
   useEffect(() => {
     let cancelled = false;
     const refreshScopeAnswers = () => {
-      const localAnswers = hasApiSession() ? {} : loadCMMCScopeAnswers();
+      const localAnswers = isApiEnabled ? {} : loadCMMCScopeAnswers();
       setScopeAnswers(localAnswers);
 
       if (!hasApiSession()) return;
@@ -82,7 +83,7 @@ export function useCMMCWorkflowState() {
             setScopeAnswers((currentAnswers) => mergeApiWorkspaceAnswers(currentAnswers, workspaceData));
           }
         })
-        .catch(() => {});
+        .catch((error) => dispatchPersistenceError("Unable to load CMMC data from the backend.", error));
     };
 
     refreshScopeAnswers();
@@ -107,11 +108,17 @@ export function useCMMCWorkflowState() {
     const savedAnswers = normalizeAnswers(nextAnswers);
     recordScopeAnswerActivities(currentAnswers, savedAnswers);
     setScopeAnswers(savedAnswers);
-    if (hasApiSession()) {
+    if (isApiEnabled && hasApiSession()) {
       saveApiWorkspaceItem(CMMC_FRAMEWORK_ID, SCOPE_WORKSPACE_ITEM_ID, { answers: savedAnswers }, undefined, "questionnaire")
-        .catch(() => setScopeAnswers(currentAnswers));
-    } else {
+        .catch((error) => {
+          setScopeAnswers(currentAnswers);
+          dispatchPersistenceError("Your CMMC changes were not saved to the backend.", error);
+        });
+    } else if (!isApiEnabled) {
       saveCMMCScopeAnswers(savedAnswers);
+    } else {
+      setScopeAnswers(currentAnswers);
+      dispatchPersistenceError("Your CMMC changes were not saved to the backend.", apiSessionRequiredError());
     }
     return savedAnswers;
   }, [scopeAnswers]);
@@ -516,12 +523,42 @@ function persistCMMCEvidenceWorkflowState(evidenceKey, state = {}) {
 }
 
 function persistCMMCWorkflowState(itemId, state = {}, itemType) {
-  if (!hasApiSession() || !itemId) return Promise.resolve(null);
+  if (!itemId) return Promise.resolve(null);
+  if (isApiEnabled && !hasApiSession()) {
+    const error = apiSessionRequiredError();
+    dispatchPersistenceError("Your CMMC changes were not saved to the backend.", error);
+    return Promise.reject(error);
+  }
+  if (!isApiEnabled) return Promise.resolve(null);
   return saveApiWorkspaceItem(CMMC_FRAMEWORK_ID, itemId, stripApiMetadata(state), undefined, itemType)
     .then(() => {
       window.dispatchEvent(new Event(CMMC_SPRS_EVENT));
       window.dispatchEvent(new Event("spectramind:workspace-updated"));
+    })
+    .catch((error) => {
+      if (!error?.validationFailed) {
+        dispatchPersistenceError("Your CMMC changes were not saved to the backend.", error);
+      }
+      throw error;
     });
+}
+
+function apiSessionRequiredError() {
+  const error = new Error("Your backend session is missing or expired. Sign in again before editing.");
+  error.status = 401;
+  error.code = "API_SESSION_REQUIRED";
+  return error;
+}
+
+function dispatchPersistenceError(message, error) {
+  window.dispatchEvent(new CustomEvent(CMMC_PERSISTENCE_ERROR_EVENT, {
+    detail: {
+      message,
+      reason: error?.message || "Backend request failed.",
+      status: error?.status,
+      code: error?.code,
+    },
+  }));
 }
 
 function stripApiMetadata(state = {}) {
@@ -542,6 +579,7 @@ function isImplementedControlStatus(value) {
 
 function dispatchControlStatusValidationFailure({ controlId, requestedStatus, error }) {
   const missingEvidence = Array.isArray(error?.missingEvidence) ? error.missingEvidence : [];
+  const missingObjectives = Array.isArray(error?.missingObjectives) ? error.missingObjectives : [];
   const message = error?.message || "Upload all required evidence before marking this control as Implemented.";
   window.dispatchEvent(new CustomEvent(CMMC_CONTROL_STATUS_VALIDATION_EVENT, {
     detail: {
@@ -549,6 +587,7 @@ function dispatchControlStatusValidationFailure({ controlId, requestedStatus, er
       requestedStatus,
       validationFailed: Boolean(error?.validationFailed),
       missingEvidence,
+      missingObjectives,
       message,
     },
   }));

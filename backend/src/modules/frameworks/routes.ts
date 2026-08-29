@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma.js";
 import { requireTenant } from "../../plugins/auth.js";
-import { validateCMMCImplementedEvidence } from "../../services/cmmcEvidenceValidationService.js";
+import { getEvidenceCompletionStatus, validateCMMCImplementedEvidence } from "../../services/cmmcEvidenceValidationService.js";
 
 const activateSchema = z.object({ frameworkId: z.string().min(1) });
 const checkoutSchema = z.object({ frameworkIds: z.array(z.string().min(1)).min(1).max(20).transform(values => [...new Set(values)]) });
@@ -82,6 +82,11 @@ export async function frameworkRoutes(app: FastifyInstance) {
       include: { implementations: { where: { organizationId: request.tenant.organizationId } } },
       orderBy: { externalId: "asc" },
     });
+  });
+
+  app.get("/cmmc/requirements/:requirementId/evidence-completion", async (request) => {
+    const { requirementId } = z.object({ requirementId: z.string().min(1).max(100) }).parse(request.params);
+    return getEvidenceCompletionStatus(prisma, requirementId, request.tenant.organizationId);
   });
 
   app.patch("/controls/:controlId/implementation", async (request, reply) => {

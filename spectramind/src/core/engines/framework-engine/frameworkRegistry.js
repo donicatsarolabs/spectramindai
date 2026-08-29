@@ -31,6 +31,7 @@ import cmmcTasksData from "../../framework-library/cmmc/tasks.json";
 import cmmcMappingsData from "../../framework-library/cmmc/mappings.json";
 import cmmcAIGuidanceData from "../../framework-library/cmmc/ai-guidance.json";
 import cmmcAuditRulesData from "../../framework-library/cmmc/audit-rules.json";
+import cmmcAssessmentObjectivesData from "../../framework-library/cmmc/assessment-objectives.json";
 
 export const DEFAULT_FRAMEWORK_ID = "soc2-type-ii";
 export const ISO27001_FRAMEWORK_ID = "iso27001-2022";
@@ -77,6 +78,7 @@ const frameworkLibraries = {
     mappings: cmmcMappingsData.mappings,
     aiGuidance: cmmcAIGuidanceData.aiGuidance,
     auditRules: cmmcAuditRulesData.auditRules,
+    assessmentObjectives: cmmcAssessmentObjectivesData.requirements,
   },
 };
 

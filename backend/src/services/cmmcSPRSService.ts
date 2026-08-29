@@ -26,6 +26,7 @@ type SPRSControlInput = {
   implementationUpdatedAt?: DateLike;
   workspaceState?: unknown;
   workspaceUpdatedAt?: DateLike;
+  evidenceEligible?: boolean;
 };
 
 type SPRSWorkspaceStatus = {
@@ -176,10 +177,14 @@ export async function getCMMCSPRSMetrics(
 
   const workspaceByItemId = new Map(workspaceRows.map((row) => [row.itemId, row]));
 
-  return calculateCMMCSPRSMetricsFromControls(
-    controls.map((control) => {
+  const { getEvidenceCompletionStatus } = await import("./cmmcEvidenceValidationService.js");
+  const scoredInputs = await Promise.all(controls.map(async (control) => {
       const implementation = control.implementations[0];
       const workspaceState = workspaceByItemId.get(control.externalId);
+      const requestedStatus = implementation?.status || (isRecord(workspaceState?.state) ? workspaceState.state.status : undefined);
+      const evidenceEligible = normalizeWorkspaceImplementationStatus(requestedStatus) === "IMPLEMENTED"
+        ? (await getEvidenceCompletionStatus(prisma, control.externalId, organizationId)).eligibleForCompletion
+        : undefined;
       return {
         id: control.id,
         externalId: control.externalId,
@@ -192,10 +197,10 @@ export async function getCMMCSPRSMetrics(
         implementationUpdatedAt: implementation?.updatedAt,
         workspaceState: implementation ? undefined : nonImplementedWorkspaceState(workspaceState?.state),
         workspaceUpdatedAt: implementation ? undefined : workspaceState?.updatedAt,
+        evidenceEligible,
       };
-    }),
-    frameworkId
-  );
+    }));
+  return calculateCMMCSPRSMetricsFromControls(scoredInputs, frameworkId);
 }
 
 export function calculateCMMCSPRSMetricsFromControls(
@@ -270,7 +275,7 @@ export function calculateCMMCSPRSMetricsFromControls(
     })),
     controls: scoredControls,
     assumptions: [
-      "SPRS scoring is calculated from requirement-level implementation status because the current schema does not store assessment-objective-level findings.",
+      "SPRS awards implemented/MET credit only when the centralized CMMC evidence service confirms every assessment objective has approved, uploaded, objective-mapped evidence.",
       "Partially implemented, planned, and in-progress controls are scored as not met unless future data captures one of the two explicit DoD partial-credit cases.",
       "Not Applicable is treated as no deduction, matching the DoD methodology only when the organization has documented approved non-applicability or an equivalent measure.",
       "Security requirement 3.12.4 has no numeric deduction in Annex A; if the SSP is absent, the assessment should be treated as incomplete outside this numeric score.",
@@ -290,7 +295,11 @@ export function normalizeWorkspaceImplementationStatus(value: unknown): Implemen
 function scoreControl(control: SPRSControlInput) {
   const requirementId = extractRequirementId(control.externalId);
   const points = requirementId ? SPRS_CONTROL_WEIGHTS[requirementId] ?? 1 : 1;
-  const { status, displayStatus } = resolveControlStatus(control);
+  let { status, displayStatus } = resolveControlStatus(control);
+  if (status === "IMPLEMENTED" && control.evidenceEligible === false) {
+    status = "NOT_STARTED";
+    displayStatus = "Evidence Incomplete";
+  }
   const isReady = status === "IMPLEMENTED" || status === "NOT_APPLICABLE";
   const pointsAtRisk = isReady ? 0 : points;
   const pointsSecured = isReady ? points : 0;

@@ -16,3 +16,18 @@ const schema = z.object({
 
 export const config = schema.parse(process.env);
 export const corsOrigins = config.CORS_ORIGINS.split(",").map((origin) => origin.trim().replace(/\/$/, "")).filter(Boolean);
+
+export function isAllowedCorsOrigin(origin?: string) {
+  if (!origin) return true;
+  const normalizedOrigin = origin.replace(/\/$/, "");
+  if (corsOrigins.includes(normalizedOrigin)) return true;
+  if (config.NODE_ENV !== "production") {
+    try {
+      const url = new URL(normalizedOrigin);
+      return url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname);
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}

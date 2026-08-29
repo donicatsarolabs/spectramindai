@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import AppShell from "../../../components/layout/AppShell";
 import { frameworkHasLibrary, useFrameworkWorkspace } from "../../../framework/FrameworkWorkspaceContext";
-import { CMMC_CONTROL_STATUS_VALIDATION_EVENT } from "../hooks";
+import { CMMC_CONTROL_STATUS_VALIDATION_EVENT, CMMC_PERSISTENCE_ERROR_EVENT } from "../hooks";
 import { useCMMCWorkspaceFilters } from "./CMMCWorkspaceFilters";
 
 const navigationItems = [
@@ -48,6 +48,7 @@ export default function CMMCImplementationLayout({ children }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [evidenceValidation, setEvidenceValidation] = useState(null);
+  const [persistenceError, setPersistenceError] = useState(null);
   const frameworkWorkspace = useFrameworkWorkspace();
   const shouldShowWorkspaceFilters = !["/cmmc", "/cmmc/scope", "/cmmc/gap-wizard"].includes(location.pathname);
   const {
@@ -66,12 +67,19 @@ export default function CMMCImplementationLayout({ children }) {
       setEvidenceValidation({
         controlId: String(detail.controlId || "").trim(),
         missingEvidence: Array.isArray(detail.missingEvidence) ? detail.missingEvidence : [],
+        missingObjectives: Array.isArray(detail.missingObjectives) ? detail.missingObjectives : [],
         message: detail.message || "Upload all required evidence before marking this control as Implemented.",
       });
     };
 
     window.addEventListener(CMMC_CONTROL_STATUS_VALIDATION_EVENT, handleValidationFailure);
     return () => window.removeEventListener(CMMC_CONTROL_STATUS_VALIDATION_EVENT, handleValidationFailure);
+  }, []);
+
+  useEffect(() => {
+    const handlePersistenceError = (event) => setPersistenceError(event.detail || { message: "Backend save failed." });
+    window.addEventListener(CMMC_PERSISTENCE_ERROR_EVENT, handlePersistenceError);
+    return () => window.removeEventListener(CMMC_PERSISTENCE_ERROR_EVENT, handlePersistenceError);
   }, []);
 
   return (
@@ -200,6 +208,19 @@ export default function CMMCImplementationLayout({ children }) {
             />
           )}
 
+          {persistenceError && (
+            <section role="alert" className="flex items-start justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-950 shadow-sm">
+              <div className="flex gap-3">
+                <AlertTriangle size={18} className="mt-0.5 shrink-0 text-rose-600" />
+                <div>
+                  <p className="font-black">{persistenceError.message || "Backend save failed."}</p>
+                  <p className="mt-1 font-semibold text-rose-800">{persistenceError.reason || "Check the API connection and sign in again."}</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setPersistenceError(null)} className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-rose-500 hover:bg-rose-100" aria-label="Dismiss persistence error"><X size={16} /></button>
+            </section>
+          )}
+
         {children}
       </div>
     </AppShell>
@@ -211,6 +232,7 @@ function EvidenceValidationBanner({ validation, onDismiss }) {
   const missingEvidence = validation.missingEvidence.length
     ? validation.missingEvidence
     : ["Required evidence for this control"];
+  const missingObjectives = validation.missingObjectives || [];
 
   return (
     <section role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-950 shadow-sm">
@@ -234,6 +256,18 @@ function EvidenceValidationBanner({ validation, onDismiss }) {
         </button>
       </div>
       <div className="mt-3 rounded-md border border-rose-100 bg-white/70 px-3 py-2">
+        {missingObjectives.length ? (
+          <>
+            <p className="text-xs font-black uppercase tracking-wide text-rose-500">Missing Assessment Objectives</p>
+            <ul className="mt-2 space-y-1">
+              {missingObjectives.map((objective) => (
+                <li key={objective.id} className="font-semibold text-rose-900">
+                  {objective.identifier ? `${objective.identifier} ` : ""}{objective.text}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
         <p className="text-xs font-black uppercase tracking-wide text-rose-500">Missing Evidence</p>
         <ul className="mt-2 space-y-1">
           {missingEvidence.map((item, index) => (
