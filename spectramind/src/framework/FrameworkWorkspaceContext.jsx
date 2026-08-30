@@ -4,6 +4,7 @@ import { canManageWorkspace, getOrganizationScopedStorageKey, getStoredSession }
 import { getFrameworkLibrary, resolveFrameworkId } from "../core/engines/framework-engine/frameworkRegistry";
 import { apiRequest, getApiSession, isApiEnabled } from "../api/client";
 import { useOptionalUser } from "../auth/UserContext";
+import { cmmcOnlyModeReason, isCMMCOnlyMode, isFrameworkApplicable } from "../config/complianceMode";
 
 const STORAGE_KEY = "spectramind:framework-workspace";
 const CART_STORAGE_KEY = "spectramind:framework-cart";
@@ -107,7 +108,7 @@ export function FrameworkWorkspaceProvider({ children }) {
         let selectedFrameworkIds = records
           .filter((record) => record.active)
           .map((record) => getFrameworkByIdOrSlug(record.framework?.slug || record.frameworkId)?.id)
-          .filter(Boolean);
+          .filter((id) => id && isFrameworkApplicable(id));
         const current = loadFrameworkWorkspace();
 
         // Older frontend releases kept framework selection only in browser
@@ -116,7 +117,7 @@ export function FrameworkWorkspaceProvider({ children }) {
         // subsequent device.
         const recoverableLocalIds = current.selectedFrameworkIds.filter((id) => {
           const framework = getFrameworkByIdOrSlug(id);
-          return framework && resolveFrameworkId(framework.slug) && !selectedFrameworkIds.includes(framework.id);
+          return framework && isFrameworkApplicable(framework.id) && resolveFrameworkId(framework.slug) && !selectedFrameworkIds.includes(framework.id);
         });
         if (recoverableLocalIds.length && canManageWorkspace(session?.role)) {
           try {
@@ -165,7 +166,7 @@ export function FrameworkWorkspaceProvider({ children }) {
   const selectFramework = useCallback(
     async (frameworkIdOrSlug) => {
       const framework = getFrameworkByIdOrSlug(frameworkIdOrSlug);
-      if (!framework) return null;
+      if (!framework || !isFrameworkApplicable(framework.id)) return null;
       if (!hasOrganizationWorkspace()) return null;
 
       if (isApiEnabled && getApiSession()?.token) {
@@ -194,7 +195,7 @@ export function FrameworkWorkspaceProvider({ children }) {
     (frameworkIdOrSlug) => {
       const framework = getFrameworkByIdOrSlug(frameworkIdOrSlug);
       if (!hasOrganizationWorkspace()) return null;
-      if (!framework || !workspace.selectedFrameworkIds.includes(framework.id)) return null;
+      if (!framework || !isFrameworkApplicable(framework.id) || !workspace.selectedFrameworkIds.includes(framework.id)) return null;
 
       const nextWorkspace = {
         ...workspace,
@@ -210,7 +211,7 @@ export function FrameworkWorkspaceProvider({ children }) {
   const addToCart = useCallback((frameworkIdOrSlug) => {
     const framework = getFrameworkByIdOrSlug(frameworkIdOrSlug);
     if (!hasOrganizationWorkspace()) return null;
-    if (!framework || workspace.selectedFrameworkIds.includes(framework.id)) return null;
+    if (!framework || !isFrameworkApplicable(framework.id) || workspace.selectedFrameworkIds.includes(framework.id)) return null;
     const next = cartFrameworkIds.includes(framework.id) ? cartFrameworkIds : [...cartFrameworkIds, framework.id];
     persistFrameworkCart(next);
     setCartFrameworkIds(next);
@@ -233,7 +234,7 @@ export function FrameworkWorkspaceProvider({ children }) {
 
   const checkoutCart = useCallback(async () => {
     if (!hasOrganizationWorkspace()) return [];
-    const validIds = cartFrameworkIds.filter(id => !workspace.selectedFrameworkIds.includes(id));
+    const validIds = cartFrameworkIds.filter(id => isFrameworkApplicable(id) && !workspace.selectedFrameworkIds.includes(id));
     if (!validIds.length) return [];
     if (isApiEnabled && getApiSession()?.token) {
       await apiRequest("/api/v1/organization-frameworks/checkout", {
@@ -258,7 +259,13 @@ export function FrameworkWorkspaceProvider({ children }) {
   );
 
   const availableFrameworks = useMemo(
-    () => FRAMEWORK_CATALOG.filter((framework) => !workspace.selectedFrameworkIds.includes(framework.id)),
+    () => FRAMEWORK_CATALOG
+      .filter((framework) => !workspace.selectedFrameworkIds.includes(framework.id))
+      .map((framework) => ({
+        ...framework,
+        applicable: isFrameworkApplicable(framework.id),
+        availabilityReason: isFrameworkApplicable(framework.id) ? "" : cmmcOnlyModeReason,
+      })),
     [workspace.selectedFrameworkIds]
   );
 
@@ -279,6 +286,7 @@ export function FrameworkWorkspaceProvider({ children }) {
   const value = useMemo(
     () => ({
       frameworks: FRAMEWORK_CATALOG,
+      isCMMCOnlyMode,
       selectedFrameworkIds: workspace.selectedFrameworkIds,
       selectedFrameworks,
       availableFrameworks,
@@ -346,7 +354,7 @@ function loadFrameworkWorkspace() {
     if (!parsed || typeof parsed !== "object") return emptyWorkspace();
 
     const selectedFrameworkIds = Array.isArray(parsed.selectedFrameworkIds)
-      ? parsed.selectedFrameworkIds.filter((id) => getFrameworkByIdOrSlug(id))
+      ? parsed.selectedFrameworkIds.filter((id) => getFrameworkByIdOrSlug(id) && isFrameworkApplicable(id))
       : [];
 
     const activeFramework = getFrameworkByIdOrSlug(parsed.activeFrameworkId);
@@ -380,7 +388,7 @@ function loadFrameworkCart() {
     if (!session?.organizationId) return [];
     const raw = window.localStorage.getItem(getOrganizationScopedStorageKey(CART_STORAGE_KEY, session));
     const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? [...new Set(parsed.filter(id => getFrameworkByIdOrSlug(id)))] : [];
+    return Array.isArray(parsed) ? [...new Set(parsed.filter(id => getFrameworkByIdOrSlug(id) && isFrameworkApplicable(id)))] : [];
   } catch { return []; }
 }
 

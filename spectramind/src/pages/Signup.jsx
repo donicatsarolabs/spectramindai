@@ -29,7 +29,7 @@ export default function Signup() {
       if (isApiEnabled) {
         const account = await registerWithApi({ name: form.name.trim(), email: form.email.trim(), password: form.password, role: form.role });
         login(account, { remember: true });
-        navigate(form.role === "User" ? "/join-organization" : "/onboarding/organization");
+        navigate(account.onboardingComplete ? "/dashboard" : form.role === "User" ? "/join-organization" : "/onboarding/organization");
       } else {
         const pendingInvitations = findLocalInvitations(form.email);
         const assignedRole = pendingInvitations[0]?.role || form.role;

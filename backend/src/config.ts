@@ -12,6 +12,7 @@ const schema = z.object({
   CORS_ORIGINS: z.string().default("http://localhost:5173"),
   FRAMEWORK_LIBRARY_PATH: z.string().default("../spectramind/src/core/framework-library"),
   LOCAL_FILE_ROOT: z.string().default("./data/files"),
+  CMMC_ONLY_MODE: z.string().default("true").transform(value => value.toLowerCase() === "true"),
 });
 
 export const config = schema.parse(process.env);
