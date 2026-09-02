@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getApiSession, isApiEnabled } from "../../../api/client";
 import { loadApiWorkspace, saveApiWorkspaceItem } from "../../../api/workspace";
 import {
@@ -69,18 +69,30 @@ export function getCMMCWorkflowState(scopeAnswers = loadCMMCScopeAnswers()) {
 
 export function useCMMCWorkflowState() {
   const [scopeAnswers, setScopeAnswers] = useState(() => isApiEnabled ? {} : loadCMMCScopeAnswers());
+  const scopeAnswersRef = useRef(scopeAnswers);
 
   useEffect(() => {
     let cancelled = false;
     const refreshScopeAnswers = () => {
-      const localAnswers = isApiEnabled ? {} : loadCMMCScopeAnswers();
-      setScopeAnswers(localAnswers);
-
-      if (!hasApiSession()) return;
+      if (!isApiEnabled) {
+        const localAnswers = loadCMMCScopeAnswers();
+        scopeAnswersRef.current = localAnswers;
+        setScopeAnswers(localAnswers);
+        return;
+      }
+      if (!hasApiSession()) {
+        scopeAnswersRef.current = {};
+        setScopeAnswers({});
+        return;
+      }
       loadApiWorkspace(CMMC_FRAMEWORK_ID)
         .then((workspaceData) => {
           if (!cancelled) {
-            setScopeAnswers((currentAnswers) => mergeApiWorkspaceAnswers(currentAnswers, workspaceData));
+            setScopeAnswers((currentAnswers) => {
+              const mergedAnswers = mergeApiWorkspaceAnswers(currentAnswers, workspaceData);
+              scopeAnswersRef.current = mergedAnswers;
+              return mergedAnswers;
+            });
           }
         })
         .catch((error) => dispatchPersistenceError("Unable to load CMMC data from the backend.", error));
@@ -103,25 +115,29 @@ export function useCMMCWorkflowState() {
   }, []);
 
   const updateScopeAnswers = useCallback((updater) => {
-    const currentAnswers = scopeAnswers;
+    const currentAnswers = scopeAnswersRef.current;
     const nextAnswers = typeof updater === "function" ? updater(currentAnswers) : updater;
+    if (nextAnswers === currentAnswers) return currentAnswers;
     const savedAnswers = normalizeAnswers(nextAnswers);
     recordScopeAnswerActivities(currentAnswers, savedAnswers);
+    scopeAnswersRef.current = savedAnswers;
     setScopeAnswers(savedAnswers);
     if (isApiEnabled && hasApiSession()) {
       saveApiWorkspaceItem(CMMC_FRAMEWORK_ID, SCOPE_WORKSPACE_ITEM_ID, { answers: savedAnswers }, undefined, "questionnaire")
         .catch((error) => {
+          scopeAnswersRef.current = currentAnswers;
           setScopeAnswers(currentAnswers);
           dispatchPersistenceError("Your CMMC changes were not saved to the backend.", error);
         });
     } else if (!isApiEnabled) {
       saveCMMCScopeAnswers(savedAnswers);
     } else {
+      scopeAnswersRef.current = currentAnswers;
       setScopeAnswers(currentAnswers);
       dispatchPersistenceError("Your CMMC changes were not saved to the backend.", apiSessionRequiredError());
     }
     return savedAnswers;
-  }, [scopeAnswers]);
+  }, []);
 
   const updateScopeAnswer = useCallback(
     (answerId, value) =>
@@ -196,14 +212,21 @@ export function useCMMCWorkflowState() {
         return loadCMMCScopeAnswers();
       }
 
-      const previousAnswers = loadCMMCScopeAnswers();
+      const previousAnswers = scopeAnswersRef.current;
       let previousValue = "";
       let nextValue = "";
+      let didChange = false;
       const shouldDeferActivity = field === "status" && isImplementedControlStatus(value) && hasApiSession();
       const savedAnswers = updateScopeAnswers((currentAnswers) => {
         const currentFields = getCMMCControlWorkflowFields(currentAnswers);
         previousValue = currentFields[normalizedKey]?.[field] ?? "";
         nextValue = normalizeControlWorkflowFieldValue(field, value);
+
+        if (field === "status" && options.onlyIfNotStarted && !isNotStartedControlStatus(previousValue)) {
+          return currentAnswers;
+        }
+        didChange = !areWorkflowFieldValuesEqual(previousValue, nextValue);
+        if (!didChange) return currentAnswers;
 
         if (!options.suppressActivity && !shouldDeferActivity) {
           recordCMMCActivity({
@@ -234,6 +257,7 @@ export function useCMMCWorkflowState() {
           },
         };
       });
+      if (!didChange) return savedAnswers;
       persistCMMCControlWorkflowState(normalizedKey, getCMMCControlWorkflowFields(savedAnswers)[normalizedKey])
         .then(() => {
           if (!shouldDeferActivity || options.suppressActivity) return;
@@ -255,7 +279,8 @@ export function useCMMCWorkflowState() {
         })
         .catch((error) => {
           if (!shouldDeferActivity) return;
-          const restoredAnswers = saveCMMCScopeAnswers(previousAnswers);
+          const restoredAnswers = normalizeAnswers(previousAnswers);
+          scopeAnswersRef.current = restoredAnswers;
           setScopeAnswers(restoredAnswers);
           window.dispatchEvent(new Event(CMMC_SPRS_EVENT));
           window.dispatchEvent(new Event("spectramind:workspace-updated"));
@@ -276,11 +301,48 @@ export function useCMMCWorkflowState() {
   );
 
   const updateControlAttachments = useCallback(
-    (controlKey, attachments) =>
-      updateControlWorkflowField(controlKey, "attachments", attachments, {
-        suppressActivity: true,
-      }),
-    [updateControlWorkflowField]
+    (controlKey, attachments, options = {}) => {
+      const normalizedKey = String(controlKey ?? "").trim();
+      if (!normalizedKey) return loadCMMCScopeAnswers();
+      let statusChanged = false;
+      let previousStatus = "";
+      let nextStatus = "";
+      const normalizedAttachments = normalizeControlWorkflowFieldValue("attachments", attachments);
+      const savedAnswers = updateScopeAnswers((currentAnswers) => {
+        const currentFields = getCMMCControlWorkflowFields(currentAnswers);
+        const currentControl = currentFields[normalizedKey] || {};
+        previousStatus = currentControl.status || "";
+        nextStatus = options.markInProgress && isNotStartedControlStatus(previousStatus)
+          ? "In Progress"
+          : previousStatus;
+        statusChanged = previousStatus !== nextStatus;
+
+        if (statusChanged) {
+          recordCMMCActivity({
+            activityType: CMMC_ACTIVITY_TYPES.CONTROL_STATUS_CHANGED,
+            controlId: normalizedKey,
+            previousValue: previousStatus,
+            newValue: nextStatus,
+          });
+        }
+
+        return {
+          ...currentAnswers,
+          [CONTROL_WORKFLOW_FIELDS_KEY]: {
+            ...currentFields,
+            [normalizedKey]: {
+              ...currentControl,
+              attachments: normalizedAttachments,
+              ...(nextStatus ? { status: nextStatus } : {}),
+            },
+          },
+        };
+      });
+      persistCMMCControlWorkflowState(normalizedKey, buildSharedControlWorkspace(savedAnswers)[normalizedKey])
+        .catch(() => {});
+      return savedAnswers;
+    },
+    [updateScopeAnswers]
   );
 
   const organizationProfile = useMemo(
@@ -327,6 +389,9 @@ export function getCMMCControlWorkflowFields(scopeAnswers = {}) {
     }, {});
 
     if (Object.keys(normalizedFieldValues).length) {
+      if (normalizedFieldValues.attachments?.length && isNotStartedControlStatus(normalizedFieldValues.status)) {
+        normalizedFieldValues.status = "In Progress";
+      }
       fieldsByKey[controlKey] = normalizedFieldValues;
     }
 
@@ -614,6 +679,7 @@ function normalizeAttachmentMetadataList(value) {
       const fileType = String(attachment.fileType || "").trim().toUpperCase();
       const fileSize = Number(attachment.fileSize) || 0;
       const uploadedAt = String(attachment.uploadedAt || "").trim();
+      const evidenceId = String(attachment.evidenceId || "").trim();
 
       if (!fileName || !fileType || !uploadedAt) {
         return null;
@@ -624,9 +690,22 @@ function normalizeAttachmentMetadataList(value) {
         fileType,
         fileSize,
         uploadedAt,
+        evidenceId,
       };
     })
     .filter(Boolean);
+}
+
+function isNotStartedControlStatus(value) {
+  const normalized = String(value ?? "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  return !normalized || normalized === "not started";
+}
+
+function areWorkflowFieldValuesEqual(previousValue, nextValue) {
+  if (Array.isArray(previousValue) || Array.isArray(nextValue)) {
+    return JSON.stringify(previousValue || []) === JSON.stringify(nextValue || []);
+  }
+  return String(previousValue ?? "") === String(nextValue ?? "");
 }
 
 function getEvidenceActivityType(field) {
