@@ -1,8 +1,8 @@
 import { FileText, Pin, Printer, ScrollText, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { isApiEnabled } from "../../../api/client";
-import { deleteEvidenceApi, uploadEvidenceFile } from "../../../api/evidence";
+import { deleteEvidenceApi, listEvidence, uploadEvidenceFile } from "../../../api/evidence";
 import { loadCMMCEvidenceCompletion } from "../../../api/cmmc";
 import { useUser } from "../../../auth/UserContext";
 import { canManageWorkspace } from "../../../auth/session";
@@ -91,6 +91,7 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
   );
   const [attachmentUploadStatusByControl, setAttachmentUploadStatusByControl] = useState({});
   const [completionStatusByControl, setCompletionStatusByControl] = useState({});
+  const [apiAttachmentsByControl, setApiAttachmentsByControl] = useState({});
   const normalizedSearch = searchQuery.trim().toLowerCase();
   const workflowSspForm = useMemo(
     () => buildWorkflowSspForm(organizationProfile, scopeAnswers),
@@ -102,10 +103,14 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
   );
   const workflowEvidenceRows = useMemo(
     () =>
-      evidenceRows.map((row) =>
-        applyEvidenceWorkflowFields(row, evidenceWorkflowFields[row.key], controlWorkflowFields[row.controlId])
-      ),
-    [controlWorkflowFields, evidenceWorkflowFields]
+      evidenceRows.map((row) => {
+        const workflowRow = applyEvidenceWorkflowFields(row, evidenceWorkflowFields[row.key], controlWorkflowFields[row.controlId]);
+        return {
+          ...workflowRow,
+          attachments: mergeAttachmentMetadata(workflowRow.attachments, apiAttachmentsByControl[row.controlId]),
+        };
+      }),
+    [apiAttachmentsByControl, controlWorkflowFields, evidenceWorkflowFields]
   );
   const policyDocumentRows = useMemo(
     () =>
@@ -216,6 +221,24 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
     [domainFilter, normalizedSearch, workflowEvidenceRows]
   );
 
+  const refreshApiAttachments = useCallback(() => {
+    if (!isApiEnabled) return Promise.resolve({});
+    return listEvidence(CMMC_FRAMEWORK_ID)
+      .then((records) => {
+        const attachmentsByControl = buildApiAttachmentsByControl(records);
+        setApiAttachmentsByControl(attachmentsByControl);
+        Object.keys(attachmentsByControl).forEach((controlId) => {
+          updateControlWorkflowStatus(controlId, "In Progress", { onlyIfNotStarted: true });
+        });
+        return attachmentsByControl;
+      })
+      .catch(() => ({}));
+  }, [updateControlWorkflowStatus]);
+
+  useEffect(() => {
+    refreshApiAttachments();
+  }, [refreshApiAttachments]);
+
   useEffect(() => {
     if (!isApiEnabled) return;
     let cancelled = false;
@@ -291,6 +314,13 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
           ...current,
           [controlId]: `${selectedFiles.length} evidence file${selectedFiles.length === 1 ? "" : "s"} uploaded and linked.`,
         }));
+        setApiAttachmentsByControl((current) => ({
+          ...current,
+          [controlId]: mergeAttachmentMetadata(
+            current[controlId],
+            selectedFiles.map((file) => fileToAttachmentMetadata(file, uploadedEvidenceByFile.get(file)))
+          ),
+        }));
         window.dispatchEvent(new Event("spectramind:workspace-updated"));
       } catch (error) {
         setAttachmentUploadStatusByControl((current) => ({
@@ -319,6 +349,10 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
     try {
       if (isApiEnabled && attachment.evidenceId) {
         await deleteEvidenceApi(attachment.evidenceId);
+        setApiAttachmentsByControl((current) => ({
+          ...current,
+          [controlId]: (current[controlId] || []).filter((item) => item.evidenceId !== attachment.evidenceId),
+        }));
       }
       updateControlAttachments(controlId, attachments.filter((_, index) => index !== attachmentIndex));
       setAttachmentUploadStatusByControl((current) => ({ ...current, [controlId]: "Evidence deleted." }));
@@ -954,6 +988,46 @@ function fileToAttachmentMetadata(file, evidenceRecord) {
     uploadedAt: new Date().toISOString(),
     evidenceId: evidenceRecord?.id || "",
   };
+}
+
+function buildApiAttachmentsByControl(records = []) {
+  return (Array.isArray(records) ? records : []).reduce((attachmentsByControl, record) => {
+    const version = (record.versions || []).find((item) => item.id === record.currentVersionId) || record.versions?.[0];
+    if (!version?.fileName || !version.uploadedAt) return attachmentsByControl;
+    const attachment = {
+      fileName: version.fileName,
+      fileType: attachmentTypeFromFileName(version.fileName, version.contentType),
+      fileSize: version.fileSize || 0,
+      uploadedAt: version.uploadedAt || version.createdAt,
+      evidenceId: record.id,
+    };
+    (record.mappings || []).forEach((mapping) => {
+      if (mapping.objectiveId) return;
+      const controlId = mapping.control?.externalId || "";
+      if (!controlId) return;
+      attachmentsByControl[controlId] = mergeAttachmentMetadata(attachmentsByControl[controlId], [attachment]);
+    });
+    return attachmentsByControl;
+  }, {});
+}
+
+function mergeAttachmentMetadata(...attachmentGroups) {
+  const merged = [];
+  const seen = new Set();
+  attachmentGroups.flatMap((group) => Array.isArray(group) ? group : []).forEach((attachment) => {
+    if (!attachment) return;
+    const key = attachment.evidenceId || `${attachment.fileName}:${attachment.uploadedAt}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(attachment);
+  });
+  return merged;
+}
+
+function attachmentTypeFromFileName(fileName, contentType = "") {
+  const extension = String(fileName || "").split(".").pop().toUpperCase();
+  if (supportedAttachmentTypes.has(extension)) return extension === "JPEG" ? "JPG" : extension;
+  return String(contentType || "FILE").toUpperCase();
 }
 
 function getSupportedFileType(file) {

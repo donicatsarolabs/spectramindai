@@ -338,7 +338,7 @@ export function useCMMCWorkflowState() {
           },
         };
       });
-      persistCMMCControlWorkflowState(normalizedKey, buildSharedControlWorkspace(savedAnswers)[normalizedKey])
+      persistCMMCControlWorkflowState(normalizedKey, getCMMCControlWorkflowFields(savedAnswers)[normalizedKey])
         .catch(() => {});
       return savedAnswers;
     },
