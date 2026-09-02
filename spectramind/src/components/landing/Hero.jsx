@@ -31,7 +31,7 @@ export default function Hero() {
           </h1>
 
           <p className="mt-6 max-w-2xl text-lg leading-8 text-slate-600">
-            SpectraMind gives security teams a live operating system for
+            Compvd.ai gives security teams a live operating system for
             controls, evidence, risk decisions, vendor reviews, and customer
             trust reporting.
           </p>

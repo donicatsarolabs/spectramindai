@@ -29,19 +29,19 @@ const workflow = [
   "Publish trust",
 ];
 
-export default function WhySpectraMind() {
+export default function WhyCompvd() {
   return (
     <section className="border-y border-white/70 bg-white/30 px-6 py-24 backdrop-blur lg:px-8">
       <div className="mx-auto grid max-w-7xl gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
         <div>
           <p className="text-sm font-black uppercase tracking-widest text-blue-700">
-            Why SpectraMind
+            Why Compvd.ai
           </p>
           <h2 className="mt-3 text-4xl font-black leading-tight text-slate-900 md:text-5xl">
             Make compliance feel like an operating rhythm.
           </h2>
           <p className="mt-5 text-lg leading-8 text-slate-600">
-            SpectraMind is built around the work security teams do every week:
+            Compvd.ai is built around the work security teams do every week:
             assigning owners, proving controls, resolving risk, and answering
             customer trust questions.
           </p>

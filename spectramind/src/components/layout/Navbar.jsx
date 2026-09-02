@@ -162,15 +162,9 @@ export default function Navbar() {
           onClick={handleBrandClick}
         >
           <span className="grid h-9 w-9 place-items-center rounded-lg border border-blue-300 bg-[linear-gradient(135deg,rgba(255,255,255,.95),rgba(216,180,109,.44)),linear-gradient(45deg,transparent_34%,rgba(255,255,255,.88)_50%,transparent_66%)] text-lg font-black text-blue-700 shadow-lg shadow-blue-600/20">
-            S
+            C
           </span>
-          <span className="text-lg font-black tracking-normal">
-            Spectra
-            <span className="bg-[linear-gradient(135deg,#8f5f24_0%,#b98232_30%,#d3a853_56%,#a76e29_82%,#6f491f_100%)] bg-clip-text text-transparent">
-              Mind
-            </span>
-            .ai
-          </span>
+          <span className="text-lg font-black tracking-normal">Compvd.ai</span>
         </Link>
 
         <nav className="hidden justify-center gap-1 text-sm font-semibold text-slate-600 lg:flex">

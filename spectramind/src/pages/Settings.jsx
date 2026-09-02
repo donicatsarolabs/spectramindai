@@ -100,7 +100,7 @@ export default function Settings() {
                         className="h-full w-full bg-white object-contain p-1"
                       />
                     ) : (
-                      "S"
+                      "C"
                     )}
                   </div>
                   <div>

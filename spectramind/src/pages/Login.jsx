@@ -139,7 +139,7 @@ export default function Login() {
 
           <Link to="/" className="relative flex items-center gap-3">
             <span className="flex h-11 w-11 items-center justify-center rounded-lg border border-blue-600/30 bg-[linear-gradient(135deg,rgba(255,255,255,.95),rgba(216,180,109,.52))] text-xl font-black text-blue-700 shadow-lg shadow-blue-600/20">
-              S
+              C
             </span>
             <span className="text-2xl font-black">{APP_NAME}</span>
           </Link>

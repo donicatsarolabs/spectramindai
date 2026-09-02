@@ -64,7 +64,7 @@ export default function Sidebar() {
               className="h-full w-full bg-white object-contain p-1"
             />
           ) : (
-            "S"
+            "C"
           )}
         </span>
         <div>
