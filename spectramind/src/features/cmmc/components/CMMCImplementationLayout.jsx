@@ -1,30 +1,16 @@
 import {
   AlertTriangle,
-  BarChart3,
-  ClipboardList,
-  FileText,
-  Library,
   Search,
   ShieldCheck,
-  Target,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import AppShell from "../../../components/layout/AppShell";
+import CMMCModuleNavigation from "./CMMCModuleNavigation";
 import { frameworkHasLibrary, useFrameworkWorkspace } from "../../../framework/FrameworkWorkspaceContext";
 import { CMMC_CONTROL_STATUS_VALIDATION_EVENT, CMMC_PERSISTENCE_ERROR_EVENT } from "../hooks";
 import { useCMMCWorkspaceFilters } from "./CMMCWorkspaceFilters";
-
-const navigationItems = [
-  { label: "Scope", path: "/cmmc", icon: Library, match: ["/cmmc", "/cmmc/scope"] },
-  { label: "Gap Wizard", path: "/cmmc/gap-wizard", icon: Target },
-  { label: "Organization", path: "/cmmc/organization", icon: ClipboardList },
-  { label: "SPRS Score", path: "/cmmc/sprs-score", icon: BarChart3 },
-  { label: "Auditor", path: "/cmmc/auditor", icon: Search },
-  { label: "Evidence", path: "/cmmc/evidence", icon: FileText },
-  { label: "Domains", path: "/cmmc/domains", icon: Library, matchPrefix: "/cmmc/domains" },
-];
 
 const domainOptions = [
   ["all", "All Domains"],
@@ -50,7 +36,7 @@ export default function CMMCImplementationLayout({ children }) {
   const [evidenceValidation, setEvidenceValidation] = useState(null);
   const [persistenceError, setPersistenceError] = useState(null);
   const frameworkWorkspace = useFrameworkWorkspace();
-  const shouldShowWorkspaceFilters = !["/cmmc", "/cmmc/scope", "/cmmc/gap-wizard"].includes(location.pathname);
+  const shouldShowWorkspaceFilters = !location.pathname.startsWith("/cmmc/operations/") && !["/cmmc", "/cmmc/suppliers", "/cmmc/reports", "/cmmc/uploaded-evidence", "/cmmc/overview", "/cmmc/scope", "/cmmc/gap-wizard"].includes(location.pathname);
   const {
     searchQuery,
     domainFilter,
@@ -115,35 +101,10 @@ export default function CMMCImplementationLayout({ children }) {
                 />
               </div>
 
-              <nav className="grid grid-flow-col auto-cols-[124px] gap-1 overflow-x-auto rounded-lg border border-slate-200/70 bg-white/55 p-1 shadow-inner shadow-slate-900/[0.02]">
-                {navigationItems.map((item) => {
-                  const Icon = item.icon;
-                  const active =
-                    (item.match || [item.path]).includes(location.pathname) ||
-                    (item.matchPrefix && location.pathname.startsWith(item.matchPrefix)) ||
-                    (item.label === "Scope" && location.pathname === "/implementation");
-
-                  return (
-                    <Link
-                      key={item.label}
-                      to={item.path}
-                      className={`flex h-16 flex-col items-center justify-center gap-1 rounded-lg border px-2 text-center text-xs font-black leading-tight transition ${
-                        active
-                          ? "border-amber-700/20 bg-white text-slate-950 shadow-sm"
-                          : "border-transparent text-slate-500 hover:bg-white/70 hover:text-slate-900"
-                      }`}
-                    >
-                      <Icon size={19} className={active ? "text-amber-700" : "text-slate-500"} />
-                      <span className="flex min-h-7 items-center justify-center">
-                        {item.label}
-                      </span>
-                    </Link>
-                  );
-                })}
-              </nav>
             </div>
           </header>
 
+          <CMMCModuleNavigation />
           {shouldShowWorkspaceFilters && (
             <section className="rounded-lg border border-white/75 bg-[#fffdf8]/72 p-3 shadow-xl shadow-slate-900/5 backdrop-blur">
               <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
@@ -228,7 +189,7 @@ export default function CMMCImplementationLayout({ children }) {
 }
 
 function EvidenceValidationBanner({ validation, onDismiss }) {
-  const evidencePath = `/cmmc/evidence?tab=ssp&controlId=${encodeURIComponent(validation.controlId)}`;
+  const evidencePath = `/cmmc/ssp?controlId=${encodeURIComponent(validation.controlId)}`;
   const missingEvidence = validation.missingEvidence.length
     ? validation.missingEvidence
     : ["Required evidence for this control"];

@@ -34,7 +34,7 @@ export default function WhyCompvd() {
     <section className="border-y border-white/70 bg-white/30 px-6 py-24 backdrop-blur lg:px-8">
       <div className="mx-auto grid max-w-7xl gap-12 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
         <div>
-          <p className="text-sm font-black uppercase tracking-widest text-blue-700">
+          <p className="text-sm font-black uppercase tracking-widest text-emerald-700">
             Why Compvd.ai
           </p>
           <h2 className="mt-3 text-4xl font-black leading-tight text-slate-900 md:text-5xl">
@@ -54,7 +54,7 @@ export default function WhyCompvd() {
                 key={step}
                 className="rounded-lg border border-slate-200 bg-[#fffdf8]/70 p-4"
               >
-                <div className="mb-5 flex h-9 w-9 items-center justify-center rounded-full bg-[linear-gradient(135deg,#f4dfae,#9d6f38)] text-sm font-black text-slate-900">
+                <div className="mb-5 flex h-9 w-9 items-center justify-center rounded-full bg-[linear-gradient(135deg,#19c89a,#008c68)] text-sm font-black text-white">
                   {index + 1}
                 </div>
                 <p className="text-sm font-bold text-slate-900">

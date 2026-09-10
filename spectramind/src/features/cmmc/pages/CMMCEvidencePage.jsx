@@ -54,13 +54,15 @@ const poamWorkflowFields = {
 export default function CMMCEvidencePage() {
   const { searchQuery, domainFilter, resetVersion, statusFilter } = useCMMCWorkspaceFilters();
   const [searchParams] = useSearchParams();
-  const requestedTab = searchParams.get("tab");
+  const { pathname } = useLocation();
+  const routeTab = { "/cmmc/ssp": "ssp", "/cmmc/poam": "poam", "/cmmc/policies": "policies" }[pathname];
+  const requestedTab = routeTab || searchParams.get("tab");
   const selectedPolicyKey = searchParams.get("item") || searchParams.get("itemId") || "";
   const selectedControlId = searchParams.get("controlId") || "";
   return (
     <CMMCImplementationLayout>
       <CMMCEvidenceContent
-        key={`${resetVersion}:${requestedTab || ""}:${selectedPolicyKey}:${selectedControlId}`}
+        key={`${resetVersion}:${selectedPolicyKey}:${selectedControlId}`}
         searchQuery={searchQuery}
         domainFilter={domainFilter}
         statusFilter={statusFilter}
@@ -86,9 +88,16 @@ function CMMCEvidenceContent({ searchQuery, domainFilter, statusFilter, requeste
     updateEvidenceWorkflowField,
   } = useCMMCWorkflowState();
   const sprsMetrics = useCMMCSPRSCalculation();
-  const [activeTab, setActiveTab] = useState(() =>
-    tabs.some((tab) => tab.id === requestedTab) ? requestedTab : "ssp"
-  );
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const activeTab = tabs.some((tab) => tab.id === requestedTab) ? requestedTab : "ssp";
+  const setActiveTab = (tab) => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("tab");
+    if (tab !== "ssp") next.delete("controlId");
+    if (tab !== "policies") { next.delete("item"); next.delete("itemId"); }
+    navigate({ pathname: { ssp: "/cmmc/ssp", poam: "/cmmc/poam", policies: "/cmmc/policies" }[tab], search: next.toString() ? `?${next}` : "" });
+  };
   const [attachmentUploadStatusByControl, setAttachmentUploadStatusByControl] = useState({});
   const [completionStatusByControl, setCompletionStatusByControl] = useState({});
   const [apiAttachmentsByControl, setApiAttachmentsByControl] = useState({});

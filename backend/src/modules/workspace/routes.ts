@@ -15,6 +15,7 @@ export async function workspaceRoutes(app: FastifyInstance) {
   });
   app.put("/workspace/:itemId", async (request, reply) => {
     const { itemId } = z.object({ itemId: z.string().min(1).max(200) }).parse(request.params);
+    if (itemId.startsWith("cmmc-operation:")) return reply.code(403).send({ message: "Use the CMMC operations endpoint for operational records." });
     const input = z.object({ frameworkId: z.string(), itemType: z.string().max(100).optional(), state: z.record(z.string(), z.any()), version: z.number().int().positive().optional() }).parse(request.body);
     const current = await prisma.workspaceItemState.findUnique({ where: { organizationId_frameworkId_itemId: { organizationId: request.tenant.organizationId, frameworkId: input.frameworkId, itemId } } });
     if (current && input.version && current.version !== input.version) return reply.code(409).send({ code: "VERSION_CONFLICT", message: "Workspace item was updated by another user", current });
