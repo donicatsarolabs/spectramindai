@@ -10,25 +10,12 @@ import AppShell from "../../../components/layout/AppShell";
 import CMMCModuleNavigation from "./CMMCModuleNavigation";
 import { frameworkHasLibrary, useFrameworkWorkspace } from "../../../framework/FrameworkWorkspaceContext";
 import { CMMC_CONTROL_STATUS_VALIDATION_EVENT, CMMC_PERSISTENCE_ERROR_EVENT } from "../hooks";
+import { cmmcDomains } from "../data/cmmcDomains";
 import { useCMMCWorkspaceFilters } from "./CMMCWorkspaceFilters";
 
-const domainOptions = [
-  ["all", "All Domains"],
-  ["AC", "Access Control"],
-  ["AT", "Awareness and Training"],
-  ["AU", "Audit and Accountability"],
-  ["IR", "Incident Response"],
-  ["MA", "Maintenance"],
-  ["MP", "Media Protection"],
-  ["PS", "Personnel Security"],
-  ["PE", "Physical Protection"],
-  ["RA", "Risk Assessment"],
-  ["CA", "Security Assessment"],
-  ["SC", "System and Communications Protection"],
-  ["SI", "System and Information Integrity"],
-];
+const domainOptions = [["all", "All Domains"], ...cmmcDomains.map(({ shortCode, name }) => [shortCode, name])];
 
-const statusOptions = ["All", "Not Started", "In Progress", "Completed"];
+const statusOptions = ["All", "Not Started", "In Progress", "Completed", "Not Applicable"];
 
 export default function CMMCImplementationLayout({ children }) {
   const location = useLocation();
@@ -36,7 +23,7 @@ export default function CMMCImplementationLayout({ children }) {
   const [evidenceValidation, setEvidenceValidation] = useState(null);
   const [persistenceError, setPersistenceError] = useState(null);
   const frameworkWorkspace = useFrameworkWorkspace();
-  const shouldShowWorkspaceFilters = !location.pathname.startsWith("/cmmc/operations/") && !["/cmmc", "/cmmc/suppliers", "/cmmc/reports", "/cmmc/uploaded-evidence", "/cmmc/overview", "/cmmc/scope", "/cmmc/gap-wizard"].includes(location.pathname);
+  const shouldShowWorkspaceFilters = !location.pathname.startsWith("/cmmc/operations/") && !["/cmmc", "/cmmc/uploaded-evidence", "/cmmc/overview", "/cmmc/scope", "/cmmc/gap-wizard"].includes(location.pathname);
   const {
     searchQuery,
     domainFilter,

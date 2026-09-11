@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { apiRequest, isApiEnabled } from "../../../api/client";
 import { canManageWorkspace, readScopedJson, writeScopedJson } from "../../../auth/session";
 import { useUser } from "../../../auth/UserContext";
-import { validateOperation } from "../data/operations";
+import { operationModules, validateOperation } from "../data/operations";
 
 const KEY = "compvd:cmmc-operations";
 const EVENT = "compvd:cmmc-operations-updated";
@@ -21,7 +21,7 @@ export function useCMMCOperations() {
     const sequence = ++requestSequence.current;
     try {
       const records = isApiEnabled ? await apiRequest("/api/v1/cmmc/operations") : readScopedJson(KEY, []);
-      if (scopeRef.current === scope && sequence === requestSequence.current) setData({ scope, records, loading: false, error: "" });
+      if (scopeRef.current === scope && sequence === requestSequence.current) setData({ scope, records: records.filter(record => Object.hasOwn(operationModules, record.module)), loading: false, error: "" });
     } catch (error) { if (scopeRef.current === scope && sequence === requestSequence.current) setData(current => ({ ...current, scope, loading: false, error: error.message })); }
   }, [scope]);
   useEffect(() => {

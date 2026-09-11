@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { CMMCPageLayout, CMMCProgressRing } from "../components";
 import { useCMMCSPRSCalculation } from "../hooks";
 import CMMCModuleNavigation from "../components/CMMCModuleNavigation";
-import CMMCOperationSummary from "../components/CMMCOperationSummary";
 
 const stages = [
   { title: "01 · Scope & assess", description: "Define your boundary, review requirements, and identify implementation gaps.", links: [["System scope", "/cmmc/scope"], ["Gap wizard", "/cmmc/gap-wizard"], ["Requirements", "/cmmc/controls"]] },
@@ -43,7 +42,7 @@ export default function CMMCImplementationDashboard({ embedded = false }) {
 }
 
 function EmbeddedOverview({ children }) {
-  return <div className="space-y-6"><CMMCModuleNavigation /><CMMCOperationSummary />{children}</div>;
+  return <div className="space-y-6"><CMMCModuleNavigation />{children}</div>;
 }
 
 function SectionTitle({ title, to }) {

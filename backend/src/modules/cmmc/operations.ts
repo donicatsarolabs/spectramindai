@@ -7,7 +7,7 @@ import { requireTenant } from "../../plugins/auth.js";
 const frameworkId = "cmmc-level-2";
 const prefix = "cmmc-operation:";
 export const operationSchema = z.object({
-  module: z.enum(["calendar", "changes", "access-reviews", "procedures", "documents", "risks", "incidents", "assets"]),
+  module: z.enum(["calendar", "procedures", "documents"]),
   title: z.string().trim().min(1).max(300),
   owner: z.string().trim().min(1).max(200),
   status: z.string().min(1).max(50),
@@ -19,34 +19,25 @@ export const operationSchema = z.object({
   archived: z.boolean().default(false),
 }).superRefine((record, ctx) => {
   const statuses: Record<string, string[]> = {
-    calendar: ["Scheduled", "In Progress", "Completed"], changes: ["Draft", "In Review", "Approved", "Implemented", "Rolled Back"],
-    "access-reviews": ["Open", "In Review", "Completed"], procedures: ["Draft", "In Review", "Approved", "Retired"],
-    documents: ["Draft", "In Review", "Approved", "Superseded"], risks: ["Open", "Treating", "Accepted", "Closed"],
-    incidents: ["Detected", "Investigating", "Contained", "Recovering", "Closed"], assets: ["Active", "Under Review", "Retired"],
+    calendar: ["Scheduled", "In Progress", "Completed"],
+    procedures: ["Draft", "In Review", "Approved", "Retired"],
+    documents: ["Draft", "In Review", "Approved", "Superseded"],
   };
   const invalid = (message: string) => ctx.addIssue({ code: "custom", message });
   const has = (field: string) => Boolean(record.details[field]?.trim());
   if (!statuses[record.module]?.includes(record.status)) invalid("Invalid module status.");
   if (record.module === "calendar" && !record.dueDate) invalid("A calendar due date is required.");
   if (record.status === "Approved" && !has("approval")) invalid("An approval reference is required.");
-  if (record.module === "changes" && record.status === "Implemented" && (!has("approval") || !has("validation"))) invalid("Approval and validation are required.");
   if (record.module === "calendar" && record.status === "Completed" && !has("result")) invalid("An activity result is required.");
-  if (record.module === "access-reviews" && record.status === "Completed" && (!has("subject") || !["Retain", "Modify", "Revoke"].includes(record.details.decision || "") || !has("verification"))) invalid("Account, decision, and verification are required.");
-  if (record.module === "incidents" && record.status === "Closed" && !has("lessons")) invalid("Recovery verification is required.");
-  if (record.module === "risks" && ["Closed", "Accepted"].includes(record.status) && !has("decision")) invalid("A risk decision rationale is required.");
-  if (record.module === "risks" && ["likelihood", "impact", "residualLikelihood", "residualImpact"].some(field => record.details[field] && !["1", "2", "3", "4", "5"].includes(record.details[field]))) invalid("Risk ratings must be 1–5.");
   if (["documents", "procedures"].includes(record.module) && record.status === "Approved" && (!has("documentVersion") || !has("effectiveDate") || !has(record.module === "documents" ? "location" : "steps"))) invalid("Approved documents need a version, effective date, and location or procedure steps.");
   if (record.details.effectiveDate && !z.iso.date().safeParse(record.details.effectiveDate).success) invalid("Invalid effective date.");
-  if (record.module === "incidents" && ["Contained", "Recovering", "Closed"].includes(record.status) && !has("containment")) invalid("Containment actions are required.");
-  if (record.module === "incidents" && record.status === "Closed" && !has("recovery")) invalid("Recovery verification is required.");
-  if (record.module === "assets" && record.status === "Retired" && !has("disposal")) invalid("Retirement verification is required.");
 });
 
 export async function cmmcOperationRoutes(app: FastifyInstance) {
   app.addHook("preHandler", requireTenant);
   app.get("/cmmc/operations", async request => {
     const rows = await prisma.workspaceItemState.findMany({ where: { organizationId: request.tenant.organizationId, frameworkId, itemId: { startsWith: prefix } } });
-    return rows.map(row => ({ ...(row.state as object), id: row.itemId.slice(prefix.length), version: row.version }));
+    return rows.filter(row => ["calendar", "procedures", "documents"].includes(String((row.state as Record<string, unknown>)?.module))).map(row => ({ ...(row.state as object), id: row.itemId.slice(prefix.length), version: row.version }));
   });
   app.put("/cmmc/operations/:id", async (request, reply) => {
     if (!["OWNER", "ADMIN", "COMPLIANCE_MANAGER"].includes(request.tenant.role)) return reply.code(403).send({ message: "Only workspace managers can change operational records." });

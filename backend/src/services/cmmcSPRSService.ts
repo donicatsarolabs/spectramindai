@@ -155,9 +155,10 @@ export const SPRS_MIN_SCORE = SPRS_MAX_SCORE - SPRS_TOTAL_DEDUCTION_POINTS;
 
 export async function getCMMCSPRSMetrics(
   organizationId: string,
-  frameworkId = CMMC_FRAMEWORK_ID
+  frameworkId = CMMC_FRAMEWORK_ID,
+  client: Prisma.TransactionClient = prisma
 ) {
-  const activeFramework = await prisma.organizationFramework.findUnique({
+  const activeFramework = await client.organizationFramework.findUnique({
     where: { organizationId_frameworkId: { organizationId, frameworkId } },
   });
   if (!activeFramework?.active) {
@@ -165,25 +166,26 @@ export async function getCMMCSPRSMetrics(
   }
 
   const [controls, workspaceRows] = await Promise.all([
-    prisma.control.findMany({
+    client.control.findMany({
       where: { frameworkId },
       include: { implementations: { where: { organizationId } } },
       orderBy: { externalId: "asc" },
     }),
-    prisma.workspaceItemState.findMany({
+    client.workspaceItemState.findMany({
       where: { organizationId, frameworkId },
     }),
   ]);
 
   const workspaceByItemId = new Map(workspaceRows.map((row) => [row.itemId, row]));
 
-  const { getEvidenceCompletionStatus } = await import("./cmmcEvidenceValidationService.js");
+  const { getEvidenceCompletionStatuses } = await import("./cmmcEvidenceValidationService.js");
+  const completionStatuses = await getEvidenceCompletionStatuses(client, organizationId);
   const scoredInputs = await Promise.all(controls.map(async (control) => {
       const implementation = control.implementations[0];
       const workspaceState = workspaceByItemId.get(control.externalId);
       const requestedStatus = implementation?.status || (isRecord(workspaceState?.state) ? workspaceState.state.status : undefined);
       const evidenceEligible = normalizeWorkspaceImplementationStatus(requestedStatus) === "IMPLEMENTED"
-        ? (await getEvidenceCompletionStatus(prisma, control.externalId, organizationId)).eligibleForCompletion
+        ? completionStatuses.get(control.externalId)?.eligibleForCompletion === true
         : undefined;
       return {
         id: control.id,
@@ -296,9 +298,11 @@ function scoreControl(control: SPRSControlInput) {
   const requirementId = extractRequirementId(control.externalId);
   const points = requirementId ? SPRS_CONTROL_WEIGHTS[requirementId] ?? 1 : 1;
   let { status, displayStatus } = resolveControlStatus(control);
+  const declaredStatus = displayStatus;
+  const evidenceIncomplete = status === "IMPLEMENTED" && control.evidenceEligible === false;
   if (status === "IMPLEMENTED" && control.evidenceEligible === false) {
-    status = "NOT_STARTED";
-    displayStatus = "Evidence Incomplete";
+    status = "IN_PROGRESS";
+    displayStatus = "In Progress";
   }
   const isReady = status === "IMPLEMENTED" || status === "NOT_APPLICABLE";
   const pointsAtRisk = isReady ? 0 : points;
@@ -317,6 +321,8 @@ function scoreControl(control: SPRSControlInput) {
     controlFamily,
     status,
     displayStatus,
+    declaredStatus,
+    evidenceIncomplete,
     deduction: points,
     points,
     pointsSecured,

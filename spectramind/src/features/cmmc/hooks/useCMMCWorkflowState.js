@@ -73,7 +73,13 @@ export function useCMMCWorkflowState() {
 
   useEffect(() => {
     let cancelled = false;
+    let sequence = 0;
+    let activeSession = "";
     const refreshScopeAnswers = () => {
+      const request = ++sequence;
+      const session = getApiSession();
+      const key = `${session?.token || ''}:${session?.organizationId || ''}`;
+      if (key !== activeSession) { activeSession = key; scopeAnswersRef.current = {}; setScopeAnswers({}); }
       if (!isApiEnabled) {
         const localAnswers = loadCMMCScopeAnswers();
         scopeAnswersRef.current = localAnswers;
@@ -87,19 +93,22 @@ export function useCMMCWorkflowState() {
       }
       loadApiWorkspace(CMMC_FRAMEWORK_ID)
         .then((workspaceData) => {
-          if (!cancelled) {
-            setScopeAnswers((currentAnswers) => {
-              const mergedAnswers = mergeApiWorkspaceAnswers(currentAnswers, workspaceData);
+          if (!cancelled && request === sequence) {
+            setScopeAnswers(() => {
+              const mergedAnswers = mergeApiWorkspaceAnswers({}, workspaceData);
               scopeAnswersRef.current = mergedAnswers;
               return mergedAnswers;
             });
           }
         })
-        .catch((error) => dispatchPersistenceError("Unable to load CMMC data from the backend.", error));
+        .catch((error) => { if (!cancelled && request === sequence) dispatchPersistenceError("Unable to load CMMC data from the backend.", error); });
     };
 
     refreshScopeAnswers();
 
+    window.addEventListener("spectramind:workspace-updated", refreshScopeAnswers);
+    window.addEventListener("focus", refreshScopeAnswers);
+    const refreshTimer = isApiEnabled ? window.setInterval(refreshScopeAnswers, 30000) : null;
     window.addEventListener(QUESTIONNAIRE_EVENT, refreshScopeAnswers);
     window.addEventListener(CMMC_SPRS_EVENT, refreshScopeAnswers);
     window.addEventListener("spectramind:session-updated", refreshScopeAnswers);
@@ -107,6 +116,9 @@ export function useCMMCWorkflowState() {
 
     return () => {
       cancelled = true;
+      if (refreshTimer) window.clearInterval(refreshTimer);
+      window.removeEventListener("focus", refreshScopeAnswers);
+      window.removeEventListener("spectramind:workspace-updated", refreshScopeAnswers);
       window.removeEventListener(QUESTIONNAIRE_EVENT, refreshScopeAnswers);
       window.removeEventListener(CMMC_SPRS_EVENT, refreshScopeAnswers);
       window.removeEventListener("spectramind:session-updated", refreshScopeAnswers);
@@ -123,10 +135,9 @@ export function useCMMCWorkflowState() {
     scopeAnswersRef.current = savedAnswers;
     setScopeAnswers(savedAnswers);
     if (isApiEnabled && hasApiSession()) {
-      saveApiWorkspaceItem(CMMC_FRAMEWORK_ID, SCOPE_WORKSPACE_ITEM_ID, { answers: savedAnswers }, undefined, "questionnaire")
+      saveApiWorkspaceItem(CMMC_FRAMEWORK_ID, SCOPE_WORKSPACE_ITEM_ID, { answers: Object.fromEntries(Object.entries(savedAnswers).filter(([key]) => ![CONTROL_WORKFLOW_FIELDS_KEY, EVIDENCE_WORKFLOW_FIELDS_KEY].includes(key))) }, undefined, "questionnaire")
         .catch((error) => {
-          scopeAnswersRef.current = currentAnswers;
-          setScopeAnswers(currentAnswers);
+          if (scopeAnswersRef.current === savedAnswers) { scopeAnswersRef.current = currentAnswers; setScopeAnswers(currentAnswers); }
           dispatchPersistenceError("Your CMMC changes were not saved to the backend.", error);
         });
     } else if (!isApiEnabled) {

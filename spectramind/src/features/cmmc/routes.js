@@ -2,8 +2,6 @@ import { createElement } from "react";
 import { Navigate } from "react-router-dom";
 import CMMCUploadedEvidencePage from "./pages/CMMCUploadedEvidencePage";
 import CMMCOperationsPage from "./pages/CMMCOperationsPage";
-import CMMCReportsPage from "./pages/CMMCReportsPage";
-import CMMCSuppliersPage from "./pages/CMMCSuppliersPage";
 import {
   CMMCAssessmentObjectivesPage,
   CMMCAuditReadinessPage,
@@ -19,9 +17,7 @@ import {
 } from "./pages";
 
 export const cmmcWorkspaceRoutes = [
-  { path: "/cmmc/suppliers", Component: CMMCSuppliersPage },
   { path: "/cmmc/operations/:moduleId", Component: CMMCOperationsPage },
-  { path: "/cmmc/reports", Component: CMMCReportsPage },
   { path: "/cmmc/uploaded-evidence", Component: CMMCUploadedEvidencePage },
   { path: "/cmmc", Component: CMMCScopePage },
   { path: "/cmmc/scope", Component: CMMCScopePage },

@@ -10,9 +10,9 @@ type EvidenceValidationClient = Pick<Prisma.TransactionClient, "control" | "evid
 export type AssessmentObjective = { id: string; identifier: string; text: string };
 export type RequiredEvidence = { id: string; name: string };
 type UploadedEvidence = {
-  id: string; title: string; description: string | null; tags: string[]; status?: string;
+  id: string; title: string; description: string | null; tags: string[]; status?: string; currentVersionId?: string | null;
   mappings: Array<{ objectiveId: string | null }>;
-  versions: Array<{ fileName: string; uploadedAt: Date | null }>;
+  versions: Array<{ id?: string; fileName: string; uploadedAt: Date | null }>;
 };
 type CMMCLibraryIndex = {
   objectivesByControlId: Map<string, AssessmentObjective[]>;
@@ -61,8 +61,6 @@ export async function getEvidenceCompletionStatus(
     select: { id: true, frameworkId: true, externalId: true, metadata: true },
   });
   if (!control) return emptyCompletionStatus(requirementId);
-  const objectives = await getAssessmentObjectives(control.externalId);
-  const requiredEvidence = await getRequiredEvidenceForControl(control.externalId, control.metadata);
   const uploadedEvidence = await client.evidenceRecord.findMany({
     where: {
       organizationId, frameworkId: control.frameworkId, deletedAt: null, currentVersionId: { not: null },
@@ -70,11 +68,35 @@ export async function getEvidenceCompletionStatus(
       versions: { some: { uploadedAt: { not: null } } },
     },
     select: {
-      id: true, title: true, description: true, tags: true, status: true,
+      id: true, title: true, description: true, tags: true, status: true, currentVersionId: true,
       mappings: { where: { controlId: control.id }, select: { objectiveId: true } },
-      versions: { where: { uploadedAt: { not: null } }, orderBy: { uploadedAt: "desc" }, select: { fileName: true, uploadedAt: true }, take: 10 },
+      versions: { where: { uploadedAt: { not: null } }, orderBy: { uploadedAt: "desc" }, select: { id: true, fileName: true, uploadedAt: true }, take: 10 },
     },
   });
+  return evaluateCompletion(control, uploadedEvidence);
+}
+
+// Fetch all evidence once for a workspace instead of two queries per implemented control.
+export async function getEvidenceCompletionStatuses(client: EvidenceValidationClient, organizationId: string) {
+  const [controls, evidence] = await Promise.all([
+    client.control.findMany({ where: { frameworkId: CMMC_FRAMEWORK_ID }, select: { id: true, externalId: true, metadata: true } }),
+    client.evidenceRecord.findMany({
+      where: { organizationId, frameworkId: CMMC_FRAMEWORK_ID, deletedAt: null, currentVersionId: { not: null }, status: "APPROVED" },
+      select: { id: true, title: true, description: true, tags: true, status: true, currentVersionId: true,
+        mappings: { select: { controlId: true, objectiveId: true } },
+        versions: { where: { uploadedAt: { not: null } }, select: { id: true, fileName: true, uploadedAt: true } } },
+    }),
+  ]);
+  return new Map(await Promise.all(controls.map(async control => [control.externalId, await evaluateCompletion(control,
+    evidence.filter(item => item.mappings.some(mapping => mapping.controlId === control.id)).map(item => ({ ...item, mappings: item.mappings.filter(mapping => mapping.controlId === control.id) }))
+  )] as const)));
+}
+
+async function evaluateCompletion(control: { externalId: string; metadata: unknown }, uploadedEvidence: UploadedEvidence[]): Promise<CMMCEvidenceCompletionStatus> {
+  const objectives = await getAssessmentObjectives(control.externalId);
+  const requiredEvidence = await getRequiredEvidenceForControl(control.externalId, control.metadata);
+  // An old uploaded version must never validate an unuploaded replacement.
+  uploadedEvidence = uploadedEvidence.filter(item => item.currentVersionId && item.versions.some(version => version.id === item.currentVersionId && version.uploadedAt));
   const objectiveStatuses = objectives.map((objective) => {
     const linked = uploadedEvidence.filter((evidence) => evidence.mappings.some((mapping) => mapping.objectiveId === objective.id));
     const approvedLinked = linked.filter((evidence) => evidence.status === "APPROVED");
@@ -116,7 +138,8 @@ export async function validateCMMCImplementedEvidence(
     where: input.controlDbId ? { id: input.controlDbId } : { frameworkId_externalId: { frameworkId: input.frameworkId, externalId: input.itemId || "" } },
     select: { externalId: true },
   });
-  return control ? validateRequirementCompletion(client, control.externalId, input.organizationId) : evidenceValidationPassed();
+  if (!control) throw Object.assign(new Error("CMMC requirement not found"), { statusCode: 404 });
+  return validateRequirementCompletion(client, control.externalId, input.organizationId);
 }
 
 export function getMissingRequiredEvidence(requiredEvidence: RequiredEvidence[], uploadedEvidence: UploadedEvidence[]) {
@@ -184,7 +207,7 @@ function uploadedEvidenceMatchesRequirement(evidence: UploadedEvidence, required
   return [required.id, required.name, ...required.name.split(/[;\n]+/g)].map(normalizeSearchText).filter((value) => value.length >= 4).some((token) => haystack.includes(token));
 }
 function metadataEvidenceName(metadata: unknown) { return isRecord(metadata) ? stringField(metadata, "evidenceToRequest") || stringField(metadata, "Evidence to Request") : ""; }
-function isControlWorkspaceItem(itemType?: string | null, itemId?: string, controlDbId?: string) { if (controlDbId) return true; const type = String(itemType || "").trim().toLowerCase(); return !type ? isCMMCControlId(itemId) : type.includes("control"); }
+function isControlWorkspaceItem(itemType?: string | null, itemId?: string, controlDbId?: string) { if (controlDbId) return true; const type = String(itemType || "").trim().toLowerCase(); return isCMMCControlId(itemId) || type.includes("control"); }
 function isCMMCControlId(itemId?: string) { return /^[A-Z]{2}\.L\d-\d+\.\d+\.\d+$/.test(String(itemId || "")); }
 function normalizeSearchText(value: string) { return String(value || "").toLowerCase().replace(/[^a-z0-9.]+/g, " ").replace(/\s+/g, " ").trim(); }
 function arrayOfRecords(value: unknown) { return Array.isArray(value) ? value.filter(isRecord) : []; }

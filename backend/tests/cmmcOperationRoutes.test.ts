@@ -9,7 +9,7 @@ vi.mock("../src/lib/prisma.js", () => ({ prisma: db }));
 vi.mock("../src/plugins/auth.js", () => ({ requireTenant: async (request: any) => { request.tenant = { organizationId: "org-a", userId: "user-a", role: request.headers["test-role"] || "ADMIN" }; } }));
 import { cmmcOperationRoutes } from "../src/modules/cmmc/operations.js";
 const id = "11111111-1111-4111-8111-111111111111";
-const record = { module: "assets", title: "Server", owner: "IT", status: "Active", dueDate: "", controlIds: [], relatedIds: [], evidenceIds: [], details: {}, archived: false };
+const record = { module: "calendar", title: "Review", owner: "IT", status: "Scheduled", dueDate: "2026-09-30", controlIds: [], relatedIds: [], evidenceIds: [], details: {}, archived: false };
 async function app() { const server = Fastify(); await server.register(cmmcOperationRoutes); return server; }
 beforeEach(() => { vi.resetAllMocks(); db.organizationFramework.findFirst.mockResolvedValue({ active: true }); db.workspaceItemState.findFirst.mockResolvedValue(null); db.$transaction.mockImplementation(fn => fn(db)); });
 describe("CMMC operations API isolation and saves", () => {
@@ -17,6 +17,17 @@ describe("CMMC operations API isolation and saves", () => {
     db.workspaceItemState.findMany.mockResolvedValue([]);
     const server = await app(); await server.inject({ method: "GET", url: "/cmmc/operations" });
     expect(db.workspaceItemState.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ organizationId: "org-a", frameworkId: "cmmc-level-2" }) })); await server.close();
+  });
+  it("excludes unsupported stored modules from the shared endpoint", async () => {
+    db.workspaceItemState.findMany.mockResolvedValue([
+      { itemId: `cmmc-operation:${id}`, state: record, version: 1 },
+      { itemId: "cmmc-operation:obsolete", state: { ...record, module: "obsolete" }, version: 1 },
+    ]);
+    const server = await app();
+    const response = await server.inject({ method: "GET", url: "/cmmc/operations" });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([expect.objectContaining({ id, module: "calendar" })]);
+    await server.close();
   });
   it("rejects employee writes", async () => {
     const server = await app(); const response = await server.inject({ method: "PUT", url: `/cmmc/operations/${id}`, headers: { "test-role": "EMPLOYEE" }, payload: { record, version: 0 } });

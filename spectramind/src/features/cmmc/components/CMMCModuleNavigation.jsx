@@ -4,9 +4,7 @@ const modules = [
   ["Overview", "/dashboard?framework=cmmc"], ["Scope", "/cmmc/scope"], ["Requirements", "/cmmc/controls"],
   ["Gap Wizard", "/cmmc/gap-wizard"], ["Evidence", "/cmmc/uploaded-evidence"], ["POA&M", "/cmmc/poam"],
   ["SSP", "/cmmc/ssp"], ["Policies", "/cmmc/policies"], ["Calendar", "/cmmc/operations/calendar"],
-  ["Changes", "/cmmc/operations/changes"], ["Risks", "/cmmc/operations/risks"], ["Incidents", "/cmmc/operations/incidents"],
-  ["Access Reviews", "/cmmc/operations/access-reviews"], ["Assets", "/cmmc/operations/assets"],
-  ["Suppliers", "/cmmc/suppliers"], ["SPRS", "/cmmc/sprs-score"], ["Reports", "/cmmc/reports"],
+  ["SPRS", "/cmmc/sprs-score"],
 ];
 
 export default function CMMCModuleNavigation() {

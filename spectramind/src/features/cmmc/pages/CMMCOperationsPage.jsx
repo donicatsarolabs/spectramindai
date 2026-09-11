@@ -10,7 +10,7 @@ import { loadEvidenceRecords } from "../../../evidence/EvidenceService";
 import { useUser } from "../../../auth/UserContext";
 import { useCMMCWorkflowState } from "../hooks";
 import CMMCOperationWorkbench from "../components/CMMCOperationWorkbench";
-import { workflowLabels, riskScore } from "../data/operations";
+import { workflowLabels } from "../data/operations";
 
 const controls = getFrameworkLibrary(CMMC_FRAMEWORK_ID)?.controls || [];
 export default function CMMCOperationsPage() {
@@ -64,7 +64,6 @@ function Operations({ moduleId, config }) {
       <fieldset disabled={!canEdit || saving || loading || Boolean(error)} className="space-y-4 disabled:opacity-70">
         <div className="grid gap-4 sm:grid-cols-2"><Field label={labels[1]} value={draft.title} onChange={value => update("title", value)} required /><Field label={labels[2]} value={draft.owner} onChange={value => update("owner", value)} required /><Field label="Workflow stage" type={config.statuses} value={draft.status} onChange={value => update("status", value)} /><Field label={labels[3]} type="date" value={draft.dueDate} onChange={value => update("dueDate", value)} required={moduleId === "calendar"} /></div>
         <div className="grid gap-4 sm:grid-cols-2">{config.fields.map(([key, label, type]) => <Field key={key} label={label} type={type} value={draft.details[key] || ""} onChange={value => update("details", { ...draft.details, [key]: value })} />)}</div>
-        {moduleId === "risks" && <p className="font-semibold text-emerald-700">Inherent risk: {riskScore(draft.details) ?? "Unassessed"} → Residual risk: {riskScore(draft.details, true) ?? "Unassessed"} (1–25; not a SPRS score)</p>}
         <details className="rounded-lg border border-slate-200 p-4"><summary className="cursor-pointer text-sm font-bold">Control, evidence, and related-record links</summary><div className="mt-4 space-y-4">
         <label className="block text-sm font-semibold">Linked CMMC controls<select multiple value={draft.controlIds} onChange={event => update("controlIds", [...event.target.selectedOptions].map(option => option.value))} className="mt-2 h-32 w-full rounded-lg border border-slate-200 p-2">{controls.map(control => { const id = control.controlId || control.id; return <option key={id} value={id}>{id} · {control.controlRequirement || control.title || ""}</option>; })}</select><span className="text-xs font-normal text-slate-500">Use Cmd/Ctrl to select multiple controls. Linking does not mark a control compliant.</span></label>
         <label className="block text-sm font-semibold">Related operational records<select multiple value={draft.relatedIds} onChange={event => update("relatedIds", [...event.target.selectedOptions].map(option => option.value))} className="mt-2 h-24 w-full rounded-lg border border-slate-200 p-2">{records.filter(record => record.id !== draft.id).map(record => <option key={record.id} value={record.id}>{operationModules[record.module]?.title}: {record.title}{record.archived ? " (archived)" : ""}</option>)}</select></label>
