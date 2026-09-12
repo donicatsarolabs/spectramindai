@@ -7,6 +7,10 @@ export const CMMC_EVIDENCE_VALIDATION_MESSAGE =
   "Upload and map approved evidence for every assessment objective before marking this requirement as Completed.";
 
 type EvidenceValidationClient = Pick<Prisma.TransactionClient, "control" | "evidenceRecord">;
+type EvidenceReconciliationClient = Pick<
+  Prisma.TransactionClient,
+  "control" | "evidenceRecord" | "evidenceMapping" | "workspaceItemState" | "controlImplementation" | "activityEvent"
+>;
 export type AssessmentObjective = { id: string; identifier: string; text: string };
 export type RequiredEvidence = { id: string; name: string };
 type UploadedEvidence = {
@@ -90,6 +94,76 @@ export async function getEvidenceCompletionStatuses(client: EvidenceValidationCl
   return new Map(await Promise.all(controls.map(async control => [control.externalId, await evaluateCompletion(control,
     evidence.filter(item => item.mappings.some(mapping => mapping.controlId === control.id)).map(item => ({ ...item, mappings: item.mappings.filter(mapping => mapping.controlId === control.id) }))
   )] as const)));
+}
+
+/**
+ * Keep every persisted CMMC view aligned when evidence stops being eligible.
+ * The user's implementation declaration is preserved in activity history, while
+ * the effective persisted state is moved back to In Progress until evidence is
+ * approved and covers every assessment objective again.
+ */
+export async function reconcileCMMCControlsForEvidence(
+  client: EvidenceReconciliationClient,
+  input: { evidenceId: string; organizationId: string; actorUserId: string }
+) {
+  const mappings = await client.evidenceMapping.findMany({
+    where: { evidenceId: input.evidenceId, control: { frameworkId: CMMC_FRAMEWORK_ID } },
+    select: { controlId: true, control: { select: { externalId: true } } },
+  });
+  const controls: Array<[string, { externalId: string }]> = Array.from(
+    new Map<string, { externalId: string }>(
+      mappings.map((mapping) => [mapping.controlId, mapping.control] as [string, { externalId: string }])
+    ).entries()
+  );
+
+  for (const [controlId, control] of controls) {
+    const completion = await getEvidenceCompletionStatus(client, control.externalId, input.organizationId);
+    if (completion.eligibleForCompletion) continue;
+
+    let changed = false;
+    const workspace = await client.workspaceItemState.findUnique({
+      where: {
+        organizationId_frameworkId_itemId: {
+          organizationId: input.organizationId,
+          frameworkId: CMMC_FRAMEWORK_ID,
+          itemId: control.externalId,
+        },
+      },
+    });
+    if (workspace && normalizeWorkspaceImplementationStatus((workspace.state as any)?.status) === "IMPLEMENTED") {
+      await client.workspaceItemState.update({
+        where: { id: workspace.id },
+        data: {
+          state: { ...(workspace.state as object), status: "In Progress", evidenceIncomplete: true },
+          version: { increment: 1 },
+          updatedBy: input.actorUserId,
+        },
+      });
+      changed = true;
+    }
+
+    const implementation = await client.controlImplementation.updateMany({
+      where: { organizationId: input.organizationId, controlId, status: "IMPLEMENTED" },
+      data: { status: "IN_PROGRESS", version: { increment: 1 }, updatedBy: input.actorUserId },
+    });
+    changed = changed || implementation.count > 0;
+
+    if (changed) {
+      await client.activityEvent.create({
+        data: {
+          organizationId: input.organizationId,
+          actorUserId: input.actorUserId,
+          action: "cmmc.control.evidence_invalidated",
+          entityType: "control",
+          entityId: control.externalId,
+          metadata: {
+            evidenceId: input.evidenceId,
+            missingObjectiveIds: completion.missingObjectives.map((objective) => objective.id),
+          },
+        },
+      });
+    }
+  }
 }
 
 async function evaluateCompletion(control: { externalId: string; metadata: unknown }, uploadedEvidence: UploadedEvidence[]): Promise<CMMCEvidenceCompletionStatus> {

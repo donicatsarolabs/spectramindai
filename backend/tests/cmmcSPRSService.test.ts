@@ -116,11 +116,12 @@ describe("CMMC evidence validation", () => {
           description: null,
           tags: ["cmmc", "AC.L2-3.1.1"],
           status: "APPROVED",
+          currentVersionId: "version-1",
           mappings: [
             { objectiveId: "a" }, { objectiveId: "b" }, { objectiveId: "c" },
             { objectiveId: "d" }, { objectiveId: "e" }, { objectiveId: "f" },
           ],
-          versions: [{ fileName: "AC.L2-3.1.1 evidence package.pdf", uploadedAt: new Date("2026-07-18T00:00:00.000Z") }],
+          versions: [{ id: "version-1", fileName: "AC.L2-3.1.1 evidence package.pdf", uploadedAt: new Date("2026-07-18T00:00:00.000Z") }],
         },
       ],
     });
@@ -188,7 +189,8 @@ function uploadedEvidenceForObjectives(objectiveIds: string[]) {
     description: null,
     tags: ["cmmc", "AC.L2-3.1.1"],
     status: "APPROVED",
+    currentVersionId: "version-1",
     mappings: objectiveIds.map((objectiveId) => ({ objectiveId })),
-    versions: [{ fileName: "AC.L2-3.1.1 evidence package.pdf", uploadedAt: new Date("2026-07-18T00:00:00.000Z") }],
+    versions: [{ id: "version-1", fileName: "AC.L2-3.1.1 evidence package.pdf", uploadedAt: new Date("2026-07-18T00:00:00.000Z") }],
   };
 }

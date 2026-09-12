@@ -1,6 +1,6 @@
-# CMMC combined verification — 11 September 2026
+# CMMC combined verification — 12 September 2026
 
-Result: core workflows pass, but the application cannot yet be described as issue-free. An evidence-lifecycle consistency defect remains across views.
+Result: all CMMC application checks in this verification scope pass. Requirements, SPRS, dashboard, policy, and audit-readiness views now share the same evidence-validated control state.
 
 ## Environment and scope
 
@@ -20,7 +20,7 @@ Verified local source after removing the seven requested CMMC modules. Used an i
 | Scoring | Initial score -203. Approved evidence covering all six objectives of AC.L2-3.1.1 enabled completion and increased score to -198. Deleting the evidence returned score to -203 and completed count to zero. |
 | Calendar | Saved a record linked to a real control and evidence. Stale version save rejected. |
 | Policies | 110 policy-view rows derived from control/evidence data. Shared owner and in-progress status propagated in tests. CMMC's generic policies.json is empty; its dedicated policy view uses workspace data instead. |
-| Tenant isolation | Other tenant denied access to the first tenant's evidence; its own workspace remained empty. |
+| Tenant isolation | Other tenant denied access to the first tenant's evidence; its workspace returned an independent 110-control default state. |
 | PDF primitive | Shared SSP/POA&M PDF generator produced an application/pdf payload. Full populated export rendering and downloads were not verified. |
 
 ## Fixes applied during verification
@@ -30,30 +30,20 @@ Verified local source after removing the seven requested CMMC modules. Used an i
 3. SPRS page shows explicit loading and error states instead of displaying zero totals before a successful response.
 4. SPRS refresh now ignores older overlapping responses and refreshes on session changes; absent sessions clear metrics.
 5. Added connected catalogue/policy tests and a reusable isolated-database smoke script at backend/scripts/cmmc-smoke.ts. It requires CMMC_VERIFY_ISOLATED=true and must only be run with a disposable database.
+6. Evidence replacement, rejection, restore, and deletion now immediately downgrade affected completed controls, update implementations, preserve the invalidation reason, and write an activity event.
+7. Requirements, policies, audit readiness, and dashboard metrics now consume the same effective evidence-validated control state as SPRS.
+8. Workspace writes use optimistic versions, reject stale saves, protect server-owned state fields, and refresh across active sessions.
+9. CMMC audit readiness now uses control readiness and avoids loading CMMC metrics for unrelated frameworks.
+10. Dashboard chart containers now provide stable dimensions; the browser verification produced no console warnings or errors.
 
-## Remaining findings
+## Resolved findings
 
-### High priority: completion views disagree after evidence deletion
+The prior evidence-lifecycle disagreement is resolved. The regression sequence now proves that replacement upload intent, rejection, version restore, and deletion all revoke completion until the current evidence is uploaded, mapped to every assessment objective, approved, and the control is completed again. After deletion, SPRS returns -203, dashboard returns zero implemented controls and 0% readiness, and workspace-backed views return the affected control as In Progress with `evidenceIncomplete: true`.
 
-Reproduction:
-
-1. Upload evidence mapped to every objective for AC.L2-3.1.1.
-2. Approve evidence and mark the control Completed.
-3. Delete the evidence.
-4. Open SPRS and Requirements.
-
-SPRS correctly reports no completed controls and -203. The Requirements table still shows AC.L2-3.1.1 checked and Completed, with the Access Control group showing 1/22, while its summary reports zero completed controls. The saved workspace status remains Completed. Policy status derives Published from this same saved value, so it is not evidence-validated publication status. The audit finding list also continues to treat that saved control as completed.
-
-Relevant code: backend/src/modules/evidence/routes.ts (evidence lifecycle), backend/src/modules/workspace/routes.ts (raw saved state), spectramind/src/features/cmmc/pages/CMMCOrganizationPage.jsx (raw row status versus validated summary), and spectramind/src/features/cmmc/services/cmmcPolicyWorkflowService.js (Completed-to-Published mapping).
-
-Recommended correction: give Requirements, policy/readiness views, and audit findings a shared evidence-validated effective status while retaining the user's saved implementation declaration separately. Cover deletion, rejection, and replacement-version events with regression tests. This change was not made during this verification pass.
-
-### Additional review needed: different readiness measures
-
-The same synthetic account showed 0% CMMC control readiness and 25% on the shared audit-readiness page. The pages use different calculation paths. This is not evidence that either arithmetic formula is wrong, but the labels and underlying measures need reconciliation before presenting them as one combined readiness result.
+The audit metric disagreement is also resolved. The CMMC audit page labels and displays the same control-readiness percentage used by SPRS. A new browser session showed 0% on both pages for a fresh 110-control workspace.
 
 ## Verification limits
 
-This was a focused functional verification, not a guarantee that every edge case is covered. Full multi-browser concurrent editing, long-running session changes, all assessment edits, every document export, production configuration, and load/security testing remain outside the verified result. The existing large JavaScript bundle warning remains non-blocking. The dev server also captured Recharts container-size warnings on the general dashboard; responsive chart sizing needs a separate visual check.
+This was a focused functional verification, not a guarantee that every edge case is covered. Full multi-browser concurrent editing, long-running session changes, every assessment edit, every document export, production infrastructure, and load/security testing remain outside the verified result. The production build still reports a non-blocking large JavaScript bundle warning.
 
-The core evidence-to-SPRS flow passes. A clean combined-workflow sign-off should wait for the evidence-lifecycle status inconsistency above to be resolved.
+The combined CMMC application workflow is ready for release testing. Production deployment still requires the infrastructure controls documented in the root and backend READMEs, including durable object storage and malware scanning for evidence, production identity controls, rate limiting, secrets management, monitoring, backups, and verified database isolation.

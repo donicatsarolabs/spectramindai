@@ -10,7 +10,7 @@ import { useCMMCWorkflowState } from "./useCMMCWorkflowState";
 
 const cmmcLibrary = getFrameworkLibrary(CMMC_FRAMEWORK_ID) || emptyFrameworkLibrary();
 
-export function useCMMCSPRSCalculation(frameworkLibrary = cmmcLibrary) {
+export function useCMMCSPRSCalculation(frameworkLibrary = cmmcLibrary, { enabled = true } = {}) {
   const { workflowState } = useCMMCWorkflowState();
   const [apiMetrics, setApiMetrics] = useState(null);
   const [apiState, setApiState] = useState({ isLoading: Boolean(isApiEnabled), error: null });
@@ -21,7 +21,7 @@ export function useCMMCSPRSCalculation(frameworkLibrary = cmmcLibrary) {
   );
 
   useEffect(() => {
-    if (!isApiEnabled) return undefined;
+    if (!isApiEnabled || !enabled) return undefined;
     let cancelled = false;
     let requestSequence = 0;
 
@@ -57,15 +57,15 @@ export function useCMMCSPRSCalculation(frameworkLibrary = cmmcLibrary) {
       window.removeEventListener("spectramind:cmmc-sprs-updated", refreshMetrics);
       window.removeEventListener("spectramind:workspace-updated", refreshMetrics);
     };
-  }, []);
+  }, [enabled]);
 
-  const resolvedMetrics = isApiEnabled ? apiMetrics || emptySPRSMetrics(CMMC_FRAMEWORK_ID) : fallbackMetrics;
+  const resolvedMetrics = isApiEnabled && enabled ? apiMetrics || emptySPRSMetrics(CMMC_FRAMEWORK_ID) : fallbackMetrics;
 
   return {
     ...resolvedMetrics,
-    isLoading: apiState.isLoading,
-    error: apiState.error,
-    source: isApiEnabled ? "api" : "local",
+    isLoading: isApiEnabled && enabled ? apiState.isLoading : false,
+    error: isApiEnabled && enabled ? apiState.error : null,
+    source: isApiEnabled && enabled ? "api" : "local",
   };
 }
 

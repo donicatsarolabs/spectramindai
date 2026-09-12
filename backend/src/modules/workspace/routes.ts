@@ -28,6 +28,7 @@ export async function workspaceRoutes(app: FastifyInstance) {
       const current = await tx.workspaceItemState.findUnique({ where: { organizationId_frameworkId_itemId: key } });
       if ((current?.version ?? 0) !== input.version) throw Object.assign(new Error('This record changed in another session. Reload and review before saving.'), { statusCode: 409, code: 'VERSION_CONFLICT' });
       const state = mergeWorkspacePatch(current?.state, input.state);
+      if (Object.hasOwn(input.state, 'status')) state.evidenceIncomplete = false;
       const isControl = input.frameworkId === CMMC_FRAMEWORK_ID && /^[A-Z]{2}\.L2-\d+\.\d+\.\d+$/.test(itemId);
       const itemType = isControl ? 'control' : current?.itemType || input.itemType;
       // Validate declaration changes only. Editing an owner must not rewrite a declaration.

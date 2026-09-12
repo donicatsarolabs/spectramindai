@@ -4,7 +4,7 @@ import { prisma } from "../../lib/prisma.js";
 import { requireTenant } from "../../plugins/auth.js";
 import { getEvidenceCompletionStatus, validateCMMCImplementedEvidence } from "../../services/cmmcEvidenceValidationService.js";
 import { config, hasAllFrameworkAccess } from "../../config.js";
-import { CMMC_FRAMEWORK_ID } from "../../services/cmmcSPRSService.js";
+import { CMMC_FRAMEWORK_ID, getCMMCSPRSMetrics } from "../../services/cmmcSPRSService.js";
 
 const activateSchema = z.object({ frameworkId: z.string().min(1) });
 const checkoutSchema = z.object({ frameworkIds: z.array(z.string().min(1)).min(1).max(20).transform(values => [...new Set(values)]) });
@@ -173,7 +173,12 @@ export async function frameworkRoutes(app: FastifyInstance) {
       prisma.trainingAssignment.count({ where: { course: { organizationId: request.tenant.organizationId } } }),
       prisma.trainingAssignment.count({ where: { course: { organizationId: request.tenant.organizationId }, status: "COMPLETED" } }),
     ]);
-    const implemented = implementations.find((row) => row.status === "IMPLEMENTED")?._count ?? 0;
+    const rawImplemented = implementations.find((row) => row.status === "IMPLEMENTED")?._count ?? 0;
+    const cmmcMetrics = frameworkIds.includes(CMMC_FRAMEWORK_ID)
+      ? await getCMMCSPRSMetrics(request.tenant.organizationId, CMMC_FRAMEWORK_ID)
+      : null;
+    const isCMMCOnlyDashboard = frameworkIds.length === 1 && frameworkIds[0] === CMMC_FRAMEWORK_ID;
+    const implemented = isCMMCOnlyDashboard ? cmmcMetrics?.implementedControls ?? 0 : rawImplemented;
     const frameworkProgress = await Promise.all(activated.map(async item => {
       const [controls, implementedControls, approvedControlEvidence, totalPolicies, publishedPolicies] = await Promise.all([
         prisma.control.count({ where: { frameworkId: item.frameworkId } }),
@@ -186,13 +191,33 @@ export async function frameworkRoutes(app: FastifyInstance) {
         prisma.policy.count({ where: { organizationId: request.tenant.organizationId, frameworkId: item.frameworkId } }),
         prisma.policy.count({ where: { organizationId: request.tenant.organizationId, frameworkId: item.frameworkId, status: "ACTIVE" } }),
       ]);
+      if (item.frameworkId === CMMC_FRAMEWORK_ID && cmmcMetrics) {
+        return {
+          id: item.frameworkId,
+          name: item.framework.name,
+          slug: item.framework.slug,
+          totalControls: cmmcMetrics.totalControls,
+          implementedControls: cmmcMetrics.implementedControls,
+          approvedEvidenceControls: approvedControlEvidence.length,
+          totalPolicies,
+          publishedPolicies,
+          progressPercent: cmmcMetrics.readinessPercentage,
+        };
+      }
       const scoreTotal = controls * 2 + totalPolicies;
       const scoreCompleted = implementedControls + approvedControlEvidence.length + publishedPolicies;
       return { id: item.frameworkId, name: item.framework.name, slug: item.framework.slug, totalControls: controls, implementedControls, approvedEvidenceControls: approvedControlEvidence.length, totalPolicies, publishedPolicies, progressPercent: scoreTotal ? Math.round(scoreCompleted / scoreTotal * 100) : 0 };
     }));
     const scoreTotal = totalControls * 2 + policiesTotal;
     const scoreCompleted = implemented + approvedEvidenceControls.length + policiesPublished;
-    return { totalControls, implementedControls: implemented, approvedEvidenceControls: approvedEvidenceControls.length, progressPercent: scoreTotal ? Math.round(scoreCompleted / scoreTotal * 100) : 0, frameworkProgress, byStatus: implementations, recentActivity, evidenceTotal, policiesTotal, policiesPublished, openRisks, highRisks, openTasks, auditFindings, employeesTotal, trainingAssigned, trainingCompleted, trainingCompletionPercent: trainingAssigned ? Math.round(trainingCompleted / trainingAssigned * 100) : 0 };
+    const progressPercent = isCMMCOnlyDashboard ? cmmcMetrics?.readinessPercentage ?? 0 : scoreTotal ? Math.round(scoreCompleted / scoreTotal * 100) : 0;
+    const byStatus = isCMMCOnlyDashboard && cmmcMetrics ? [
+      { status: "IMPLEMENTED", _count: cmmcMetrics.implementedControls },
+      { status: "IN_PROGRESS", _count: cmmcMetrics.inProgressControls },
+      { status: "NOT_STARTED", _count: cmmcMetrics.notStartedControls },
+      { status: "NOT_APPLICABLE", _count: cmmcMetrics.notApplicableControls },
+    ] : implementations;
+    return { totalControls, implementedControls: implemented, approvedEvidenceControls: approvedEvidenceControls.length, progressPercent, frameworkProgress, byStatus, recentActivity, evidenceTotal, policiesTotal, policiesPublished, openRisks, highRisks, openTasks, auditFindings, employeesTotal, trainingAssigned, trainingCompleted, trainingCompletionPercent: trainingAssigned ? Math.round(trainingCompleted / trainingAssigned * 100) : 0 };
   });
 }
 

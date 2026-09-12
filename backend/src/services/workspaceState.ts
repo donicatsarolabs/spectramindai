@@ -23,9 +23,11 @@ export async function readWorkspace(tx: Prisma.TransactionClient, organizationId
   if (frameworkId !== CMMC_FRAMEWORK_ID) return result;
   const metrics = await getCMMCSPRSMetrics(organizationId, frameworkId, tx);
   for (const control of metrics.controls) {
+    const persistedEvidenceIncomplete = result[control.controlId]?.evidenceIncomplete === true;
     result[control.controlId] = {
       ...result[control.controlId], status: control.displayStatus,
-      apiDeclaredStatus: control.declaredStatus, evidenceIncomplete: control.evidenceIncomplete,
+      apiDeclaredStatus: control.declaredStatus,
+      evidenceIncomplete: control.evidenceIncomplete || persistedEvidenceIncomplete,
       apiVersion: result[control.controlId]?.apiVersion ?? 0, apiItemType: 'control',
     };
   }

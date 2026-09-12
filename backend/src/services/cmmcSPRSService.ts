@@ -302,7 +302,7 @@ function scoreControl(control: SPRSControlInput) {
   const evidenceIncomplete = status === "IMPLEMENTED" && control.evidenceEligible === false;
   if (status === "IMPLEMENTED" && control.evidenceEligible === false) {
     status = "IN_PROGRESS";
-    displayStatus = "In Progress";
+    displayStatus = "Evidence Incomplete";
   }
   const isReady = status === "IMPLEMENTED" || status === "NOT_APPLICABLE";
   const pointsAtRisk = isReady ? 0 : points;
